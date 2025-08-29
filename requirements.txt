@@ -1,0 +1,6 @@
+python-dotenv
+justai
+justdays
+sqlalchemy
+psycopg2-binary
+boto3

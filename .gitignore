@@ -1,0 +1,10 @@
+/cache/
+/venv/
+.env
+/last_sent.json
+/summary.jsonl
+/summary.md
+.DS_Store
+.envrc
+.idea/
+__pycache__/
