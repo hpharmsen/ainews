@@ -2,9 +2,11 @@ import json
 import time
 from pathlib import Path
 import base64
-import io
+from io import BytesIO
 import os
 
+import requests
+from google import genai
 from openai import OpenAI
 from PIL import Image
 from justai import Model
@@ -14,6 +16,7 @@ from database import get_last_newsletter
 from s3 import S3
 
 SCRIPT_MODEL = 'gemini-2.5-pro'
+IMAGE_MODEL = "gemini-2.5-flash-image-preview"
 
 COLORS = ['rood', 'groen', 'grijs', 'bruin', 'oranje', 'paars', 'blauw']
 BIG_LABS = ['OpenAI', 'Google', 'Meta', 'Facebook', 'Instagram','Microsoft', 'IBM', 'Apple', 'Amazon', 'xAI',
@@ -174,8 +177,6 @@ def generate_ai_image(article: dict, schedule: str, cached: bool) -> str:
     else:
         print('Generating image...')
 
-        client = OpenAI()
-
         if schedule == 'daily':
             color = COLORS[Day().day_of_week()]
         else:
@@ -189,7 +190,7 @@ def generate_ai_image(article: dict, schedule: str, cached: bool) -> str:
             "Toon concrete opbjecten of afbeeldingen van genoemde personen waar mogelijk.\n"
             "Gebruik de 3 meegegeven afbeeldingen uitsluitend als STIJLREFERENTIE (kleurpalet, penseelstreek, licht, textuur), "
             f"niet als inhoud die moet worden gerepliceerd. Gebruik hierbij {color} als basiskleur. "
-            "Geen tekst in de afbeelding."
+            "LET OP! Zet GEEN tekst in de afbeelding."
         )
         for brand, lab in BRANDS.items():
             if brand in article['title'] or brand in article['summary']:
@@ -202,34 +203,10 @@ def generate_ai_image(article: dict, schedule: str, cached: bool) -> str:
             "https://s3.eu-west-1.amazonaws.com/harmsen.nl/nieuwsbrief/mirabel4.jpg",
         ]
 
-        # Responses API call met tool "image_generation"
-        resp = client.responses.create(
-            model="gpt-5",
-            input=[{
-                "role": "user",
-                "content": [
-                    {"type": "input_text", "text": prompt},
-                    *[{"type": "input_image", "image_url": url} for url in style_refs],
-                ],
-            }],
-            tools=[{"type": "image_generation"}],
-        )
+        model = Model(IMAGE_MODEL)
+        img = model.generate_image(prompt, style_refs, size=(550,300))
 
-        images_b64 = extract_images(resp)
-        if not images_b64:
-            # Handige debug: laat zien welke output-types we kregen
-            types = [getattr(x, "type", type(x).__name__) for x in (getattr(resp, "output", []) or [])]
-            raise RuntimeError(f"Geen afbeelding gevonden in response. Output types: {types}")
-
-        # Decode base64 -> PIL image
-        raw = base64.b64decode(images_b64[0])
-        img = Image.open(io.BytesIO(raw))
-
-        target_w, target_h = 550, 300
-        img_cropped = crop_to_fit(img, target_w, target_h)
-
-        # Sla de eerste afbeelding op (PNG)
-        img_cropped.save(out_path, format="PNG")
+        img.save(out_path, format="PNG")
 
     # Uploaden naar S3
     s3 = S3('harmsen.nl')
@@ -237,62 +214,3 @@ def generate_ai_image(article: dict, schedule: str, cached: bool) -> str:
     return url
 
 
-# --- Robuuste extractie van base64 PNG uit verschillende SDK-vormen ---
-def extract_images(r):
-    images_b64 = []
-
-    # 1) Nieuwere SDK's plaatsen vaak "message" items met content entries
-    for item in getattr(r, "output", []) or []:
-        itype = getattr(item, "type", None)
-
-        # a) Message met content -> zoek 'output_image' of 'image'
-        if itype == "message":
-            for part in getattr(item, "content", []) or []: # Hier komt ie
-                ptype = getattr(part, "type", None)
-                img = getattr(part, "image", None)
-                # part.image.base64
-                if img is not None and hasattr(img, "base64"):
-                    images_b64.append(img.base64)
-
-        # b) Direct image item
-        if itype in {"image", "output_image"}:
-            img = getattr(item, "image", None)
-            if img is not None and hasattr(img, "base64"):
-                images_b64.append(img.base64)
-
-        # c) Sommige versies leveren een 'image_generation_call' met 'result'
-        if itype == "image_generation_call":
-            if hasattr(item, "result") and item.result: # Hier komt ie ook
-                # Kan al base64 string zijn
-                images_b64.append(item.result)
-
-    # 2) Fallback: oudere voorbeelden met response.output[0].content[0].image.base64
-    if not images_b64:
-        try:
-            maybe = r.output[0].content[0].image.base64
-            if maybe:
-                images_b64.append(maybe)
-        except Exception:
-            pass
-
-    return images_b64
-
-
-def crop_to_fit(image: Image.Image, target_w: int, target_h: int) -> Image.Image:
-    src_w, src_h = image.size
-    target_ratio = target_w / target_h
-    src_ratio = src_w / src_h
-
-    if src_ratio > target_ratio:
-        # bron is breder dan doel → crop links/rechts
-        new_w = int(src_h * target_ratio)
-        left = (src_w - new_w) // 2
-        box = (left, 0, left + new_w, src_h)
-    else:
-        # bron is hoger dan doel → crop boven/onder
-        new_h = int(src_w / target_ratio)
-        top = (src_h - new_h) // 2
-        box = (0, top, src_w, top + new_h)
-
-    cropped = image.crop(box)
-    return cropped.resize((target_w, target_h), Image.LANCZOS)

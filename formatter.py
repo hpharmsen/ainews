@@ -6,8 +6,7 @@ from pathlib import Path
 def build_html_email(schedule: str, items: list[dict], newsletter_title: str, intro_text: str, image_url: str) -> str:
 
     schedule_naam = 'dagelijkse' if schedule == 'daily' else 'weekelijkse'
-    footer_text = f"""Geselecteerd en geschreven door AI • 
-    Mogelijk gemaakt door Harmsen AI Consultancy<br>
+    footer_text = f"""Nieuwsselectie: AI<br>Teksten: AI<br>Graphic design: AI<br>Eindredactie: AI<br><br> 
     Je ontvangt deze mail omdat je bent aangemeld voor de {schedule_naam} nieuwsbrief."""
     switch_url = 'https://harmsen.nl/nieuwsbrief/'
     if schedule == 'daily':
