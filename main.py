@@ -61,7 +61,7 @@ if __name__ == '__main__':
     schedule, use_cached = parse_command_line()
     text = get_raw_mail_text(schedule, cached=use_cached, verbose=VERBOSE)
     summary = generate_ai_summary(schedule, text, cached=use_cached, verbose=VERBOSE)
-    image_url = generate_ai_image(summary[0], schedule)
+    image_url = generate_ai_image(summary[0], schedule, cached=use_cached)
     title = create_title(schedule)
     html_mail = create_html_email(schedule, summary, title, image_url)
     add_to_database(schedule, title, html_mail, image_url)

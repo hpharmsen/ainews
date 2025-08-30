@@ -187,6 +187,7 @@ def get_raw_mail_text(schedule: str, cached: bool=False, verbose: bool=False):
 
     if cached and cache_file.is_file():
         with open(cache_file, 'r', encoding='utf-8') as f:
+            print("Using cached emails")
             return f.read()
 
     print("Connecting to email ...")

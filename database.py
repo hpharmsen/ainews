@@ -1,8 +1,8 @@
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
-from sqlalchemy import create_engine, MetaData, text
+from sqlalchemy import create_engine, MetaData, text, select, desc, func, and_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 
@@ -43,18 +43,49 @@ def db_connect():
 
 
 def add_to_database(schedule, title, newsletter_html, image_url):
-
+    """
+    Voeg een nieuwsbrief toe aan de database, waarbij er maar één per dag per schedule kan bestaan.
+    Als er al een nieuwsbrief met dezelfde schedule op dezelfde dag bestaat, wordt deze vervangen.
+    Gebruikt de Amsterdam tijdzone voor de datumvergelijking.
+    """
     engine, table = db_connect()
+    
+    # Huidige tijd in Amsterdam tijdzone
+    amsterdam_tz = timezone(timedelta(hours=2))  # CEST (UTC+2)
+    now = datetime.now(amsterdam_tz)
+    
+    with engine.begin() as conn:
+        # Delete any existing newsletter with the same schedule on the same day
+        delete_stmt = table.delete().where(
+            and_(
+                table.c.schedule == schedule,
+                func.date(table.c.sent) == now.date()
+            )
+        )
+        conn.execute(delete_stmt)
+        
+        # Insert the new newsletter
+        insert_stmt = pg_insert(table).values(
+            schedule=schedule,
+            title=title,
+            sent=now,
+            text=newsletter_html,
+            image_url=image_url
+        )
+        conn.execute(insert_stmt)
+    
+    print(f"✅ Nieuwsbrief toegevoegd aan de database (heeft eventuele bestaande voor {now.date()} vervangen).")
 
-    stmt = pg_insert(table).values(
-        schedule=schedule,
-        title=title,
-        sent=datetime.now(),
-        text=newsletter_html,
-        image_url=image_url
+
+def get_last_newsletter(schedule: str) -> str:
+    engine, table = db_connect()
+    stmt = (
+        select(table.c.text)
+        .where(table.c.schedule == schedule)
+        .order_by(desc(table.c.sent))
+        .limit(1)
     )
-
-    with engine.begin() as conn:  # begin() doet ook commit automatisch
-        conn.execute(stmt)
-
-    print(f"✅ Newsletter added to the database.")
+    
+    with engine.connect() as conn:
+        result = conn.execute(stmt).fetchone()
+    return result[0] if result else None

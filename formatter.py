@@ -23,6 +23,7 @@ def build_html_email(schedule: str, items: list[dict], newsletter_title: str, in
     for item in items:
         title = html.escape(item.get("title", ""))
         summary = html.escape(item.get("summary", ""))
+        summary = '<p>' + summary.replace('\n\n', '</p><p>').replace('\n', '<br>') + '</p>'
         links = item.get("links") or []
         # Linklijst
         links_html = ""
