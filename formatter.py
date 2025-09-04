@@ -2,12 +2,19 @@ import html
 from datetime import date
 from pathlib import Path
 
+from ai import COPY_WRITE_MODEL_NAME, DESIGN_MODEL_NAME, ART_DIRECTION_MODEL_NAME
+
 
 def build_html_email(schedule: str, items: list[dict], newsletter_title: str, intro_text: str, image_url: str) -> str:
 
     schedule_naam = 'dagelijkse' if schedule == 'daily' else 'weekelijkse'
-    footer_text = f"""Nieuwsselectie: AI<br>Teksten: AI<br>Graphic design: AI<br>Eindredactie: AI<br><br> 
-    Je ontvangt deze mail omdat je bent aangemeld voor de {schedule_naam} nieuwsbrief."""
+    footer_text = f"""<b>Colofon</b><br>
+    Nieuwsselectie: {COPY_WRITE_MODEL_NAME}<br>
+    Teksten: {COPY_WRITE_MODEL_NAME}<br>
+    Art direction: {ART_DIRECTION_MODEL_NAME}<br>
+    Graphic design: {DESIGN_MODEL_NAME}<br>
+    Aansturen van alle AI: HP<br><br> 
+    Je ontvangt deze mail omdat je bent aangemeld voor de <b>{schedule_naam}</b> nieuwsbrief."""
     switch_url = 'https://harmsen.nl/nieuwsbrief/'
     if schedule == 'daily':
         switch_url += 'wekelijks'
@@ -20,8 +27,8 @@ def build_html_email(schedule: str, items: list[dict], newsletter_title: str, in
     # Kaarten opbouwen
     cards_html = []
     for item in items:
-        title = html.escape(item.get("title", ""))
-        summary = html.escape(item.get("summary", ""))
+        title = item.get("title", "")
+        summary = item.get("summary", "")
         summary = '<p>' + summary.replace('\n\n', '</p><p>').replace('\n', '<br>') + '</p>'
         links = item.get("links") or []
         # Linklijst

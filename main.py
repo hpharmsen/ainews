@@ -60,9 +60,10 @@ if __name__ == '__main__':
 
     schedule, use_cached = parse_command_line()
     text = get_raw_mail_text(schedule, cached=use_cached, verbose=VERBOSE)
-    summary = generate_ai_summary(schedule, text, cached=use_cached, verbose=VERBOSE)
-    image_url = generate_ai_image(summary[0], schedule, cached=use_cached)
+    articles = generate_ai_summary(schedule, text, cached=use_cached, verbose=VERBOSE)
+    article_index, image_url = generate_ai_image(articles, schedule, cached=use_cached)
+    articles = [articles[article_index]] + articles[:article_index] + articles[article_index + 1 :]
     title = create_title(schedule)
-    html_mail = create_html_email(schedule, summary, title, image_url)
+    html_mail = create_html_email(schedule, articles, title, image_url)
     add_to_database(schedule, title, html_mail, image_url)
     send_newsletter(schedule, html_mail, title)

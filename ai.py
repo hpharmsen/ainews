@@ -1,22 +1,22 @@
 import json
 import time
 from pathlib import Path
-import base64
-from io import BytesIO
 import os
 
-import requests
-from google import genai
-from openai import OpenAI
-from PIL import Image
+import httpx
 from justai import Model
 from justdays import Day
 
 from database import get_last_newsletter
 from s3 import S3
 
-SCRIPT_MODEL = 'gemini-2.5-pro'
-IMAGE_MODEL = "gemini-2.5-flash-image-preview"
+COPY_WRITE_MODEL = 'gemini-2.5-pro'
+COPY_WRITE_MODEL_NAME = 'Gemini 2.5 Pro'
+ART_DIRECTION_MODEL = "gpt-5"
+ART_DIRECTION_MODEL_NAME = "GPT-5"
+DESIGN_MODEL = "gemini-2.5-flash-image-preview"
+DESIGN_MODEL_NAME = "Nano Banana"
+IMAGE_STYLE = 'Mirabel'
 
 COLORS = ['rood', 'groen', 'grijs', 'bruin', 'oranje', 'paars', 'blauw']
 BIG_LABS = ['OpenAI', 'Google', 'Meta', 'Facebook', 'Instagram','Microsoft', 'IBM', 'Apple', 'Amazon', 'xAI',
@@ -26,7 +26,7 @@ BRANDS['GPT'] = 'OpenAI'
 BRANDS['Claude'] = 'Anthropic'
 BRANDS['Grok'] = 'xAI'
 
-PROMPT = """DOEL
+COPYWRITE_PROMPT = """DOEL
 Maak een selectie en samenvatting van AI-nieuws uit ontvangen e-mails, in de schrijfstijl van Hans-Peter Harmsen (HP), geschikt voor een nieuwsbrief.
 
 STIJL-DNA (VOLG STRENG)
@@ -101,9 +101,10 @@ UITVOERFORMAAT (STRICT)
 Geef je antwoord terug als een JSON-array met maximaal [MAX_ARTICLES] objecten met precies deze velden:
 [
   {
-    "title": "Korte, informatieve titel (geen clickbait)",
-    "summary": "Zie OUTPUT-STIJLSJABLOON; 4–8 zinnen met regelafbrekingen toegestaan.",
-    "links": ["https://canonieke-bron-1", "https://bron-2"]
+    "title": "Korte, informatieve titel (geen clickbait). Gebruik geen markdown- of html opmaak maar plain text.",
+    "summary": "Zie OUTPUT-STIJLSJABLOON; 4–8 zinnen met regelafbrekingen toegestaan. Gebruik geen markdown- of html opmaak maar plain text.",
+    "links": ["https://canonieke-bron-1", "https://bron-2"],
+    "sources": Lijst van bronnen die gebruikt werden om de samenvatting te maken
   }
 ]
 
@@ -131,10 +132,10 @@ def generate_ai_summary(schedule: str, text: str, verbose=False, cached=True):
             return summary
 
     # Generate new summary
-    model = Model(SCRIPT_MODEL)
+    model = Model(COPY_WRITE_MODEL)
     max_articles = 7 if schedule == 'daily' else 12
     latest_newsletter = get_last_newsletter(schedule).split('<!-- Cards -->',1)[1].split('<!-- Footer -->')[0]
-    prompt = PROMPT\
+    prompt = COPYWRITE_PROMPT\
                  .replace('[MAX_ARTICLES]', str(max_articles))\
                  .replace('[LATEST_NEWSLETTER]', latest_newsletter)\
                  .replace('[NEWS_EMAILS]', text)
@@ -147,6 +148,19 @@ def generate_ai_summary(schedule: str, text: str, verbose=False, cached=True):
             time.sleep(1)
     else:
         summary = model.prompt(prompt, return_json=True, cached=True)
+
+    # Check the urls by opening them and see if they return a proper web page
+    print('\nChecking links ...')
+    for item in summary:
+        for link in item['links']:
+            try:
+                response = httpx.get(link)
+                if response.status_code != 200:
+                    print(f'Status code was {response.status_code} for link {link}')
+                    item['links'].remove(link)
+            except:
+                print(f'Link {link} is not valid')
+                item["links"].remove(link)
 
     # Save to cache
     with open(cache_file, "w", encoding="utf-8") as f:
@@ -164,7 +178,7 @@ def generate_ai_summary(schedule: str, text: str, verbose=False, cached=True):
     return summary
 
 
-def generate_ai_image(article: dict, schedule: str, cached: bool) -> str:
+def generate_ai_image(articles: list[dict], schedule: str, cached: bool) -> str:
     """
     Genereer 1 afbeelding via Responses API + image_generation tool,
     met 4 image-URL's als STIJLREFERENTIE (geen content copy).
@@ -174,43 +188,84 @@ def generate_ai_image(article: dict, schedule: str, cached: bool) -> str:
     out_path = os.path.join("cache", img_name)
     if cached and os.path.isfile(out_path):
         print('Loading image from cache')
+        article_index = 0
     else:
+        print('Selecting article for image...')
+        article_index, prompt = select_article_for_image(articles)
+
+        prompt, images = add_style_to_prompt(prompt, articles[article_index], schedule)
+
         print('Generating image...')
-
-        if schedule == 'daily':
-            color = COLORS[Day().day_of_week()]
-        else:
-            color = COLORS[Day().week_number() % len(COLORS)]
-
-        prompt = (
-            "Maak een nieuwe, tekstloze visual die past bij dit AI-nieuwsartikel.\n"
-            f'Kop: "{article["title"]}"\n'
-            f"Samenvatting:\n<summary>\n{article['summary']}\n</summary>\n\n"
-            "Belangrijk: laat de afbeelding zo goed mogelijk aansluiten bij de inhoud van het artikel.\n"
-            "Toon concrete opbjecten of afbeeldingen van genoemde personen waar mogelijk.\n"
-            "Gebruik de 3 meegegeven afbeeldingen uitsluitend als STIJLREFERENTIE (kleurpalet, penseelstreek, licht, textuur), "
-            f"niet als inhoud die moet worden gerepliceerd. Gebruik hierbij {color} als basiskleur. "
-            "LET OP! Zet GEEN tekst in de afbeelding."
-        )
-        for brand, lab in BRANDS.items():
-            if brand in article['title'] or brand in article['summary']:
-                prompt += f'\nNeem het {lab} logo op in de afbeelding'
-
-        style_refs = [
-            "https://s3.eu-west-1.amazonaws.com/harmsen.nl/nieuwsbrief/mirabel1.jpg",
-            # "https://s3.eu-west-1.amazonaws.com/harmsen.nl/nieuwsbrief/mirabel2.jpg",
-            "https://s3.eu-west-1.amazonaws.com/harmsen.nl/nieuwsbrief/mirabel3.jpg",
-            "https://s3.eu-west-1.amazonaws.com/harmsen.nl/nieuwsbrief/mirabel4.jpg",
-        ]
-
-        model = Model(IMAGE_MODEL)
-        img = model.generate_image(prompt, style_refs, size=(550,300))
+        model = Model(DESIGN_MODEL)
+        img = model.generate_image(prompt, images, size=(600,300))
+        img = img.crop((25, 0, 575, 300)) # Nodig voor Google omdat die er borders omheen zet
 
         img.save(out_path, format="PNG")
 
     # Uploaden naar S3
     s3 = S3('harmsen.nl')
     url = s3.add(out_path, img_name)
-    return url
+    return article_index, url
 
 
+def select_article_for_image(articles: list[dict]) -> tuple[int, str, list]:
+
+    prompt = f"""Ik heb een nieuwsbrief over AI met de volgende {len(articles)} artikelen:
+    <nieuwsbrief>
+    {articles}
+    </nieuwsbrief>
+    
+    Nu wil ik een AI model een afbeelding laten genereren die goed past bij de inhoud. 
+    Ik wil geen generiek AI beeld met robots en futuristische lijnen maar het liefst een illustratie 
+    die echt past bij de inhoud van één van de artikelen.
+    
+    Doe de volgende stappen:
+    1. Denk na over welk van de {len(articles)} artikelen zich hier het beste voor leent en waarom?
+    2. Denk na over wat er dan in die illustratie zou moeten komen te staan.
+    3. Schrijf een concrete beeldprompt waarmee ik dit direct in een beeldgeneratie-API kunt invoeren. 
+    Maak in die beeldprompt duidelijk dat de inhoud van de afbeelding beeldvullend moet zijn. Ik wil geen randen om de afbeelding heen hebben.      
+    4. Geef je antwoord in JSON met 2 velden: 
+    - article: index van het artikel dat je hebt geselecteerd (0 tot {len(articles)-1})
+    - prompt: de beeldprompt"""
+
+    model = Model(ART_DIRECTION_MODEL)
+
+    res = model.prompt(prompt, return_json=True, cached=False)
+    return res['article'], res['prompt']
+
+
+def add_style_to_prompt(prompt: str, article: str, schedule: str) -> tuple[str, list[str]]:
+
+    if IMAGE_STYLE == 'Illustration':
+        style_description = """Editorial-style illustration showing a creative studio environment. 
+        The style is modern editorial illustration, clean lines, flat colors with subtle texture, 
+        similar to The Economist or Axios illustrations. No robots, no futuristic grids, focus on 
+        creativity, product diversity and playful design."""
+        images = []
+
+    elif IMAGE_STYLE == 'Mirabel':
+
+        if schedule == 'daily':
+            color = COLORS[Day().day_of_week()]
+        else:
+            color = COLORS[Day().week_number() % len(COLORS)]
+
+        prompt += f"""## Stijl voor de afbeelding
+            Gebruik de 3 meegegeven afbeeldingen uitsluitend als STIJLREFERENTIE (kleurpalet, penseelstreek, licht, textuur),
+            niet als inhoud die moet worden gerepliceerd. Gebruik hierbij {color} als basiskleur. 
+            LET OP! Zet GEEN tekst in de afbeelding.\n"""
+
+        for brand, lab in BRANDS.items():
+            if brand in article['title'] or brand in article['summary']:
+                prompt += f'\nNeem het {lab} logo op in de afbeelding'
+
+        images = [
+            "https://s3.eu-west-1.amazonaws.com/harmsen.nl/nieuwsbrief/mirabel1.jpg",
+            # "https://s3.eu-west-1.amazonaws.com/harmsen.nl/nieuwsbrief/mirabel2.jpg",
+            "https://s3.eu-west-1.amazonaws.com/harmsen.nl/nieuwsbrief/mirabel3.jpg",
+            "https://s3.eu-west-1.amazonaws.com/harmsen.nl/nieuwsbrief/mirabel4.jpg",
+        ]
+    else:
+        assert False, f"Unknown image style: {IMAGE_STYLE}"
+
+    return prompt, images

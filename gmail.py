@@ -230,7 +230,11 @@ def get_raw_mail_text(schedule: str, cached: bool=False, verbose: bool=False):
                     subject = decode_email_header(details['subject'])
                     print(f"{sender_name} {details['sender_email']} - {details['date']} - {subject}")
                 body = mail.get_email_body(email_id)
-                text += body + "\n\n"
+                text += '==================================================\n' + \
+                f"Source: {sender_name} {details['sender_email']}\n" + \
+                f"Date: {details['date']}\n" + \
+                f"Subject: {subject}\n" + \
+                body + "\n\n"
 
     with open(cache_file, 'w', encoding='utf-8') as f:
         f.write(text)
