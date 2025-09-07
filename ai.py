@@ -2,6 +2,7 @@ import json
 import time
 from pathlib import Path
 import os
+from typing import Tuple
 
 import httpx
 from justai import Model
@@ -120,6 +121,14 @@ VALIDATIE VOOR TERUGSTUREN
 
 """
 
+STYLE_IMAGES = [
+    "https://s3.eu-west-1.amazonaws.com/harmsen.nl/nieuwsbrief/mirabel1.jpg",
+    # "https://s3.eu-west-1.amazonaws.com/harmsen.nl/nieuwsbrief/mirabel2.jpg",
+    "https://s3.eu-west-1.amazonaws.com/harmsen.nl/nieuwsbrief/mirabel3.jpg",
+    "https://s3.eu-west-1.amazonaws.com/harmsen.nl/nieuwsbrief/mirabel4.jpg",
+]
+
+
 def generate_ai_summary(schedule: str, text: str, verbose=False, cached=True):
     cache_file = Path(__file__).parent / 'cache' / f"{schedule}_summary.jsonl"
     
@@ -178,7 +187,7 @@ def generate_ai_summary(schedule: str, text: str, verbose=False, cached=True):
     return summary
 
 
-def generate_ai_image(articles: list[dict], schedule: str, cached: bool) -> str:
+def generate_ai_image(articles: list[dict], schedule: str, cached: bool, max_retries: int = 3) -> Tuple[int, str]:
     """
     Genereer 1 afbeelding via Responses API + image_generation tool,
     met 4 image-URL's als STIJLREFERENTIE (geen content copy).
@@ -186,29 +195,59 @@ def generate_ai_image(articles: list[dict], schedule: str, cached: bool) -> str:
     """
     img_name = f"{Day()}.png" if schedule == "daily" else f"week{Day().week_number()}.png"
     out_path = os.path.join("cache", img_name)
+    
     if cached and os.path.isfile(out_path):
         print('Loading image from cache')
         article_index = 0
     else:
         print('Selecting article for image...')
-        article_index, prompt = select_article_for_image(articles)
-
-        prompt, images = add_style_to_prompt(prompt, articles[article_index], schedule)
+        article_index: int
+        article_index, description = select_article_for_image(articles)
+        prompt = create_image_prompt(articles[article_index], description, schedule)
 
         print('Generating image...')
         model = Model(DESIGN_MODEL)
-        img = model.generate_image(prompt, images, size=(600,300))
-        img = img.crop((25, 0, 575, 300)) # Nodig voor Google omdat die er borders omheen zet
+        
+        # Retry logic with exponential backoff
+        for attempt in range(max_retries):
+            try:
+                if attempt > 0:
+                    print(f'Generating image (attempt {attempt + 1}/{max_retries})...')
+                
+                img = model.generate_image(prompt, STYLE_IMAGES, size=(600, 300))
+                
+                img.save(out_path, format="PNG")
+                print('Image generated successfully')
+                break
+                
+            except (httpx.ReadTimeout, TimeoutError) as e:
+                if attempt == max_retries - 1:  # Last attempt
+                    print(f'Failed to generate image after {max_retries} attempts')
+                    raise Exception(f'Image generation timed out after {max_retries} attempts') from e
+                    
+                print(f'Timeout occurred, retrying...')
+                time.sleep(1)
+                
+            except Exception as e:
+                if attempt == max_retries - 1:  # Last attempt
+                    print(f'Failed to generate image: {str(e)}')
+                    raise
+                print(f'Error generating image: {str(e)}. Retrying...')
+                time.sleep(5)  # Shorter delay for non-timeout errors
 
-        img.save(out_path, format="PNG")
-
-    # Uploaden naar S3
+    # Upload to S3
     s3 = S3('harmsen.nl')
-    url = s3.add(out_path, img_name)
-    return article_index, url
+    for attempt in range(3):
+        try:
+            url = s3.add(out_path, img_name)
+            return article_index, url
+        except Exception as e:
+            print(f'Error uploading to S3, retrying... (attempt {attempt + 1}/3)')
+            time.sleep(5 * (attempt + 1))  # Exponential backoff for S3 upload
+    raise TimeoutError('Failed to upload image to S3 after 3 attempts')
 
 
-def select_article_for_image(articles: list[dict]) -> tuple[int, str, list]:
+def select_article_for_image(articles: list[dict]) -> tuple[int, str]:
 
     prompt = f"""Ik heb een nieuwsbrief over AI met de volgende {len(articles)} artikelen:
     <nieuwsbrief>
@@ -222,50 +261,44 @@ def select_article_for_image(articles: list[dict]) -> tuple[int, str, list]:
     Doe de volgende stappen:
     1. Denk na over welk van de {len(articles)} artikelen zich hier het beste voor leent en waarom?
     2. Denk na over wat er dan in die illustratie zou moeten komen te staan.
-    3. Schrijf een concrete beeldprompt waarmee ik dit direct in een beeldgeneratie-API kunt invoeren. 
-    Maak in die beeldprompt duidelijk dat de inhoud van de afbeelding beeldvullend moet zijn. Ik wil geen randen om de afbeelding heen hebben.      
-    4. Geef je antwoord in JSON met 2 velden: 
+    3. Geef je antwoord in JSON met 2 velden: 
     - article: index van het artikel dat je hebt geselecteerd (0 tot {len(articles)-1})
-    - prompt: de beeldprompt"""
+    - description: een beschrijving van de afbeelding die je hebt geselecteerd"""
 
     model = Model(ART_DIRECTION_MODEL)
 
     res = model.prompt(prompt, return_json=True, cached=False)
-    return res['article'], res['prompt']
+    return res['article'], res['description']
 
 
-def add_style_to_prompt(prompt: str, article: str, schedule: str) -> tuple[str, list[str]]:
-
-    if IMAGE_STYLE == 'Illustration':
-        style_description = """Editorial-style illustration showing a creative studio environment. 
-        The style is modern editorial illustration, clean lines, flat colors with subtle texture, 
-        similar to The Economist or Axios illustrations. No robots, no futuristic grids, focus on 
-        creativity, product diversity and playful design."""
-        images = []
-
-    elif IMAGE_STYLE == 'Mirabel':
-
-        if schedule == 'daily':
-            color = COLORS[Day().day_of_week()]
-        else:
-            color = COLORS[Day().week_number() % len(COLORS)]
-
-        prompt += f"""## Stijl voor de afbeelding
-            Gebruik de 3 meegegeven afbeeldingen uitsluitend als STIJLREFERENTIE (kleurpalet, penseelstreek, licht, textuur),
-            niet als inhoud die moet worden gerepliceerd. Gebruik hierbij {color} als basiskleur. 
-            LET OP! Zet GEEN tekst in de afbeelding.\n"""
-
-        for brand, lab in BRANDS.items():
-            if brand in article['title'] or brand in article['summary']:
-                prompt += f'\nNeem het {lab} logo op in de afbeelding'
-
-        images = [
-            "https://s3.eu-west-1.amazonaws.com/harmsen.nl/nieuwsbrief/mirabel1.jpg",
-            # "https://s3.eu-west-1.amazonaws.com/harmsen.nl/nieuwsbrief/mirabel2.jpg",
-            "https://s3.eu-west-1.amazonaws.com/harmsen.nl/nieuwsbrief/mirabel3.jpg",
-            "https://s3.eu-west-1.amazonaws.com/harmsen.nl/nieuwsbrief/mirabel4.jpg",
-        ]
+def create_image_prompt(article, description, schedule):
+    print('Generating image prompt...')
+    if schedule == "daily":
+        color = COLORS[Day().day_of_week()]
     else:
-        assert False, f"Unknown image style: {IMAGE_STYLE}"
+        color = COLORS[Day().week_number() % len(COLORS)]
 
-    return prompt, images
+    prompt = f"""Schrijf een concrete beeldprompt voor het genereren van een afbeelding bij een artikel uit een nieuwsbrief over AI. 
+    Beschrijving van de afbeelding: 
+    <beschrijving>
+    {description}
+    </beschrijving>
+    
+    De volgende dingen zijn hierbij belangrijk:
+    1. De inhoud van de afbeelding moet beeldvullend moet zijn. Ik wil geen randen om de afbeelding heen hebben.
+    2. Er mag geen tekst in de afbeeldingen mag komen te staan.  
+    3. De 3 meegegeven afbeeldingen dienen als STIJLREFERENTIE (kleurpalet, penseelstreek, licht, textuur), 
+    4. Die afbeeldingen mogen alleen gebruikt worden voor de stijl; niet als inhoud die moet worden gerepliceerd. 
+    5. Zet verder geen stijlbeschrijving in de prompt want dat moet uit de afbeeldingen blijken.
+    6. De kleur {color} moet de basiskleur worden voor de afbeelding.
+
+    Retourneer alleen de prompt. Geen andere tekst ervoor of erna."""
+    index = 7
+    for brand, lab in BRANDS.items():
+        if brand in article["title"] or brand in article["summary"]:
+            prompt += f"\n    {index}. Het {lab} logo moet opgenomenen worden op in de afbeelding."
+            index += 1
+
+    model = Model(ART_DIRECTION_MODEL)
+    image_prompt = model.prompt(prompt, return_json=False, cached=False)
+    return image_prompt

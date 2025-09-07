@@ -1,7 +1,7 @@
 /cache/
 /venv/
 .env
-/last_sent.json
+/data/last_sent.json
 /summary.jsonl
 /summary.md
 .DS_Store

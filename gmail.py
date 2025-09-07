@@ -33,6 +33,40 @@ class Mail:
             print(f"Failed to connect to IMAP server: {str(e)}")
             return False
 
+    def delete_sent_email_by_message_id(self, message_id):
+        """
+        Delete a sent email by its Message-ID.
+        Returns True if deleted, False otherwise.
+        """
+        if not self.mail:
+            if not self.connect():
+                return False
+
+        try:
+            # Select the Sent folder
+            status, _ = self.mail.select('"[Gmail]/Verzonden items"', readonly=False)
+            if status != 'OK':
+                print("Failed to access Sent folder")
+                return False
+
+            # Search for the email by Message-ID
+            status, email_ids = self.mail.search(None, f'(HEADER Message-ID "{message_id}")')
+            if status != 'OK' or not email_ids or not email_ids[0]:
+                print(f"Email with Message-ID {message_id} not found in Sent folder")
+                return False
+
+            # Delete the found email(s) - should be just one
+            for email_id in email_ids[0].split():
+                self.mail.store(email_id, '+FLAGS', '\\Deleted')
+            
+            # Expunge the deleted email
+            self.mail.expunge()
+            return True
+
+        except Exception as e:
+            print(f"Error deleting email: {str(e)}")
+            return False
+
     def get_emails(self):
         """Retrieve all email IDs from the specified label."""
         try:
@@ -203,7 +237,7 @@ def get_raw_mail_text(schedule: str, cached: bool=False, verbose: bool=False):
         return
 
     # Read last sent date from last_sent.json
-    last_sent_file = Path(__file__).parent / 'last_sent.json'
+    last_sent_file = Path(__file__).parent / 'data' / 'last_sent.json'
     try:
         with open(last_sent_file, 'r') as f:
             last_sent_data = json.load(f)
