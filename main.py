@@ -56,7 +56,7 @@ def create_title(schedule: str) -> str:
 
 if __name__ == '__main__':
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
-    load_dotenv()
+    load_dotenv(override=True)
 
     schedule, use_cached = parse_command_line()
     text = get_raw_mail_text(schedule, cached=use_cached, verbose=VERBOSE)

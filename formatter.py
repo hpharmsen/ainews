@@ -2,6 +2,8 @@ import html
 from datetime import date
 from pathlib import Path
 
+from justdays import Day
+
 from ai import COPY_WRITE_MODEL_NAME, DESIGN_MODEL_NAME, ART_DIRECTION_MODEL_NAME
 
 
@@ -147,9 +149,9 @@ def create_html_email(schedule: str, items: list, title: str, image_url: str):
         image_url=image_url
     )
     # Schrijf naar bestand voor test/preview
-
-    cache_file = Path(__file__).parent / "cache" / f"{schedule}_newsletter.html"
+    name = f"{Day()}" if schedule == 'daily' else 'week {Day().week_number()}'
+    cache_file = Path(__file__).parent / "cache" / f"{name}.html"
     with open(cache_file, "w", encoding="utf-8") as f:
         f.write(html_email)
-    print(f"HTML e-mail opgeslagen als {schedule}_newsletter.html")
+    print(f"HTML e-mail opgeslagen als {name}.html")
     return html_email

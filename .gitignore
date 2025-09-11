@@ -2,6 +2,7 @@
 /venv/
 .env
 /data/last_sent.json
+/data/mailerlog.txt
 /summary.jsonl
 /summary.md
 .DS_Store

@@ -65,14 +65,18 @@ def create_message(recipient: str, subject: str, html_content: str, reply_to: st
 
 def delete_sent_email(message_id: str) -> bool:
     """ Returns bool: True if deletion was successful, False otherwise """
-    mail = Mail()
-    # Remove angle brackets if present
-    message_id = message_id.strip('<>')
-    if mail.delete_sent_email_by_message_id(message_id):
-        print(f"Deleted sent email with Message-ID: {message_id}")
-        return True
-    else:
-        print(f"Failed to delete sent email with Message-ID: {message_id}")
+    try:
+        mail = Mail()
+        # Remove angle brackets if present
+        message_id = message_id.strip('<>')
+        if mail.delete_sent_email_by_message_id(message_id):
+            print(f"Deleted sent email with Message-ID: {message_id}")
+            return True
+        else:
+            print(f"Failed to delete sent email with Message-ID: {message_id}")
+            return False
+    except:
+        print(f"Error while trying to delete sent email with Message-ID: {message_id}")
         return False
 
 

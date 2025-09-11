@@ -6,6 +6,7 @@ from typing import Tuple
 
 import httpx
 from justai import Model
+from justai.models.basemodel import RatelimitException
 from justdays import Day
 
 from database import get_last_newsletter
@@ -129,8 +130,31 @@ STYLE_IMAGES = [
 ]
 
 
+def check_and_resolve_url(url: str) -> str | None:
+    """Returns a valid URL (possibly redirected) or None if invalid."""
+    try:
+        resp = httpx.get(url, follow_redirects=False)
+        if 300 <= resp.status_code < 400:
+            loc = resp.headers.get('Location')
+            if not loc:
+                return None
+            try:
+                loc = httpx.URL(loc, base=httpx.URL(url)).human_repr()
+            except Exception:
+                pass
+            try:
+                follow = httpx.get(loc)
+                return loc if follow.status_code == 200 else None
+            except Exception:
+                return None
+        return url if resp.status_code == 200 else None
+    except Exception:
+        return None
+
+
 def generate_ai_summary(schedule: str, text: str, verbose=False, cached=True):
-    cache_file = Path(__file__).parent / 'cache' / f"{schedule}_summary.jsonl"
+    name = f"{Day()}" if schedule == 'daily' else 'week {Day().week_number()}'
+    cache_file = Path(__file__).parent / 'cache' / f"{name}_summary.jsonl"
     
     # Load from cache if exists and caching is enabled
     if cached and cache_file.is_file():
@@ -161,15 +185,18 @@ def generate_ai_summary(schedule: str, text: str, verbose=False, cached=True):
     # Check the urls by opening them and see if they return a proper web page
     print('\nChecking links ...')
     for item in summary:
-        for link in item['links']:
-            try:
-                response = httpx.get(link)
-                if response.status_code != 200:
-                    print(f'Status code was {response.status_code} for link {link}')
-                    item['links'].remove(link)
-            except:
+        for link in list(item['links']):
+            resolved = check_and_resolve_url(link)
+            if resolved is None:
                 print(f'Link {link} is not valid')
-                item["links"].remove(link)
+                item['links'].remove(link)
+            elif resolved != link:
+                print(f'Redirected {link} -> {resolved}')
+                try:
+                    idx = item['links'].index(link)
+                    item['links'][idx] = resolved
+                except ValueError:
+                    pass
 
     # Save to cache
     with open(cache_file, "w", encoding="utf-8") as f:
@@ -267,7 +294,7 @@ def select_article_for_image(articles: list[dict]) -> tuple[int, str]:
 
     model = Model(ART_DIRECTION_MODEL)
 
-    res = model.prompt(prompt, return_json=True, cached=False)
+    res = retry_prompt(model, prompt)
     return res['article'], res['description']
 
 
@@ -285,7 +312,7 @@ def create_image_prompt(article, description, schedule):
     </beschrijving>
     
     De volgende dingen zijn hierbij belangrijk:
-    1. De inhoud van de afbeelding moet beeldvullend moet zijn. Ik wil geen randen om de afbeelding heen hebben.
+    1. De inhoud van de afbeelding moet beeldvullend moet zijn. Ik wil ABSOLUUT geen randen om de afbeelding heen hebben.
     2. Er mag geen tekst in de afbeeldingen mag komen te staan.  
     3. De 3 meegegeven afbeeldingen dienen als STIJLREFERENTIE (kleurpalet, penseelstreek, licht, textuur), 
     4. Die afbeeldingen mogen alleen gebruikt worden voor de stijl; niet als inhoud die moet worden gerepliceerd. 
@@ -302,3 +329,15 @@ def create_image_prompt(article, description, schedule):
     model = Model(ART_DIRECTION_MODEL)
     image_prompt = model.prompt(prompt, return_json=False, cached=False)
     return image_prompt
+
+
+def retry_prompt(model, prompt) -> dict:
+    for attempt in range(5):
+        try:
+            res = model.prompt(prompt, return_json=True, cached=False)
+            return res
+        except RatelimitException:
+            print('Hitting rate limit, retrying...')
+            time.sleep(5)
+    else:
+        raise RatelimitException
