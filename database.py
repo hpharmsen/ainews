@@ -1,9 +1,12 @@
 import os
+import re
 import sys
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
 
 from sqlalchemy import create_engine, MetaData, text, select, desc, func, and_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from justdays import Day
 
 
 def normalize_db_url(db_url):
@@ -77,15 +80,31 @@ def add_to_database(schedule, title, newsletter_html, image_url):
     print(f"✅ Nieuwsbrief toegevoegd aan de database (heeft eventuele bestaande voor {now.date()} vervangen).")
 
 
-def get_last_newsletter(schedule: str) -> str:
+def     get_last_newsletter_texts(schedule: str, limit: int = 1) -> str:
     engine, table = db_connect()
     stmt = (
         select(table.c.text)
         .where(table.c.schedule == schedule)
         .order_by(desc(table.c.sent))
-        .limit(1)
+        .limit(limit)
     )
-    
+
     with engine.connect() as conn:
-        result = conn.execute(stmt).fetchone()
-    return result[0] if result else None
+        records = conn.execute(stmt).scalars().all()
+
+    parts = []
+    for text in records:
+        try:
+            part = text.split("<!-- Cards -->", 1)[1].split("<!-- Footer -->")[0]
+            part = re.sub(r"<[^>]*>", "", part)
+            parts += [part]
+        except IndexError:
+            # fallback als markers ontbreken
+            parts += [text]
+
+    return "".join(parts)
+
+
+def cache_file_prefix(schedule: str) -> str:
+    name =  str(Day()) if schedule == "daily" else f"week{Day().week_number()}"
+    return str(Path(__file__).parent / 'cache' / name)

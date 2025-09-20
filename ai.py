@@ -9,7 +9,7 @@ from justai import Model
 from justai.models.basemodel import RatelimitException
 from justdays import Day
 
-from database import get_last_newsletter
+from database import get_last_newsletter_texts, cache_file_prefix
 from s3 import S3
 
 COPY_WRITE_MODEL = 'gemini-2.5-pro'
@@ -50,10 +50,10 @@ INPUT
 [NEWS_EMAILS]
 </nieuws_emails>
 
-2) Dit is de tekst van de laatste nieuwsbrief; neem geen artikelen op die hier al in stonden (dedupe op titel/URL/inhoud):
-<laatste_nieuwsbrief>
-[LATEST_NEWSLETTER]
-</laatste_nieuwsbrief>
+2) Dit zijn de teksten van de laatste nieuwsbrieven; neem geen artikelen op die hier al in stonden (dedupe op titel/URL/inhoud):
+<laatste_nieuwsbrieven>
+[LATEST_NEWSLETTERS]
+</laatste_nieuwsbrieven>
 
 SELECTIE- EN RANGSCHIKKINGSCriteria
 - Sorteer op belangrijkheid voor professionals die AI toepassen:
@@ -76,7 +76,7 @@ OUTPUT-STIJLSJABLOON PER ITEM
 - Kort: 1 zin TL;DR met kernfeit en datum waar relevant
 - Context: 1 zin die uitlegt waarom dit nu relevant is (timing, markt, concurrentie)
 - Business-impact: 1-2 zinnen over concrete gevolgen (kosten, tijd, risico, kansen)
-- Realiteitscheck: 1 zin met beperking/risico/kanttekening
+- Realiteitscheck: 1 zin met beperking/risico/kanttekening. Alleen als dat echt relevant is.
 - Actie (optioneel, a 2 tip in de gehele nieuwsbrief): 1 concrete, testbare stap die de lezer deze week kan nemen
 
 AANWIJZINGEN
@@ -86,6 +86,8 @@ AANWIJZINGEN
 - Gebruik per item hoogstens één retorische vraag.
 - Gebruik geen markdown-opmaak (geen **vet** of #-koppen) binnen de JSON-velden.
 - Links: kies 1–3 meest gezaghebbende/brontechnische URLs (release notes, docs, blog van het lab). Vermijd tracking-parameters.
+- Begin de samenvatting niet met een vrijwel letterlijke herhaling van de titel.
+- Hou de titel kort.
 
 KWALITEITSCHECK VOOR ELKE SUMMARY
 - Bevat het item concrete, verifieerbare feiten?
@@ -124,7 +126,7 @@ VALIDATIE VOOR TERUGSTUREN
 
 STYLE_IMAGES = [
     "https://s3.eu-west-1.amazonaws.com/harmsen.nl/nieuwsbrief/mirabel1.jpg",
-    # "https://s3.eu-west-1.amazonaws.com/harmsen.nl/nieuwsbrief/mirabel2.jpg",
+    "https://s3.eu-west-1.amazonaws.com/harmsen.nl/nieuwsbrief/mirabel2.jpg",
     "https://s3.eu-west-1.amazonaws.com/harmsen.nl/nieuwsbrief/mirabel3.jpg",
     "https://s3.eu-west-1.amazonaws.com/harmsen.nl/nieuwsbrief/mirabel4.jpg",
 ]
@@ -153,10 +155,8 @@ def check_and_resolve_url(url: str) -> str | None:
 
 
 def generate_ai_summary(schedule: str, text: str, verbose=False, cached=True):
-    name = f"{Day()}" if schedule == 'daily' else 'week {Day().week_number()}'
-    cache_file = Path(__file__).parent / 'cache' / f"{name}_summary.jsonl"
-    
     # Load from cache if exists and caching is enabled
+    cache_file =  Path(cache_file_prefix(schedule) + "_summary.jsonl")
     if cached and cache_file.is_file():
         with open(cache_file, "r", encoding="utf-8") as f:
             summary = [json.loads(line) for line in f]
@@ -167,11 +167,12 @@ def generate_ai_summary(schedule: str, text: str, verbose=False, cached=True):
     # Generate new summary
     model = Model(COPY_WRITE_MODEL)
     max_articles = 7 if schedule == 'daily' else 12
-    latest_newsletter = get_last_newsletter(schedule).split('<!-- Cards -->',1)[1].split('<!-- Footer -->')[0]
+    latest_newsletters = get_last_newsletter_texts(schedule, limit=5)
     prompt = COPYWRITE_PROMPT\
                  .replace('[MAX_ARTICLES]', str(max_articles))\
-                 .replace('[LATEST_NEWSLETTER]', latest_newsletter)\
+                 .replace('[LATEST_NEWSLETTERS]', latest_newsletters)\
                  .replace('[NEWS_EMAILS]', text)
+    tokens = model.token_count(prompt)
     print('\nGenerating summary...')
     for _ in range(3):
         try:
@@ -220,9 +221,10 @@ def generate_ai_image(articles: list[dict], schedule: str, cached: bool, max_ret
     met 4 image-URL's als STIJLREFERENTIE (geen content copy).
     Slaat de 1e gegenereerde afbeelding op als PNG en retourneert het pad (of upload jouw S3).
     """
-    img_name = f"{Day()}.png" if schedule == "daily" else f"week{Day().week_number()}.png"
-    out_path = os.path.join("cache", img_name)
-    
+    out_path = Path(cache_file_prefix(schedule) + '.png')
+    shadow_img_name = Path(cache_file_prefix(schedule) + '_shadow.png')
+    shadow_out_path = os.path.join("cache", shadow_img_name)
+
     if cached and os.path.isfile(out_path):
         print('Loading image from cache')
         article_index = 0
@@ -234,17 +236,24 @@ def generate_ai_image(articles: list[dict], schedule: str, cached: bool, max_ret
 
         print('Generating image...')
         model = Model(DESIGN_MODEL)
-        
+        shadow_model = Model('reve')
         # Retry logic with exponential backoff
         for attempt in range(max_retries):
             try:
                 if attempt > 0:
                     print(f'Generating image (attempt {attempt + 1}/{max_retries})...')
-                
+
+                try:
+                    options = {"aspect_ratio": "16:9"}
+                    img = shadow_model.generate_image(prompt, STYLE_IMAGES, options=options, size=(600, 300))
+                    img.save(shadow_out_path, format="PNG")
+                except:
+                    print("Failed to generate shadow image")
+
                 img = model.generate_image(prompt, STYLE_IMAGES, size=(600, 300))
-                
                 img.save(out_path, format="PNG")
                 print('Image generated successfully')
+
                 break
                 
             except (httpx.ReadTimeout, TimeoutError) as e:
@@ -266,7 +275,7 @@ def generate_ai_image(articles: list[dict], schedule: str, cached: bool, max_ret
     s3 = S3('harmsen.nl')
     for attempt in range(3):
         try:
-            url = s3.add(out_path, img_name)
+            url = s3.add(out_path, 'nieuwsbrief/' + out_path.name)
             return article_index, url
         except Exception as e:
             print(f'Error uploading to S3, retrying... (attempt {attempt + 1}/3)')
@@ -299,6 +308,11 @@ def select_article_for_image(articles: list[dict]) -> tuple[int, str]:
 
 
 def create_image_prompt(article, description, schedule):
+    cache_file = Path(cache_file_prefix(schedule) + "_image_prompt.txt")
+    if cache_file.is_file():
+        with open(cache_file, 'r', encoding='utf-8') as f:
+            return f.read()
+
     print('Generating image prompt...')
     if schedule == "daily":
         color = COLORS[Day().day_of_week()]
@@ -328,6 +342,10 @@ def create_image_prompt(article, description, schedule):
 
     model = Model(ART_DIRECTION_MODEL)
     image_prompt = model.prompt(prompt, return_json=False, cached=False)
+
+    with open(cache_file, 'w', encoding='utf-8') as f:
+        f.write(image_prompt)
+
     return image_prompt
 
 

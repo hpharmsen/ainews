@@ -5,6 +5,7 @@ from pathlib import Path
 from justdays import Day
 
 from ai import COPY_WRITE_MODEL_NAME, DESIGN_MODEL_NAME, ART_DIRECTION_MODEL_NAME
+from database import cache_file_prefix
 
 
 def build_html_email(schedule: str, items: list[dict], newsletter_title: str, intro_text: str, image_url: str) -> str:
@@ -149,9 +150,9 @@ def create_html_email(schedule: str, items: list, title: str, image_url: str):
         image_url=image_url
     )
     # Schrijf naar bestand voor test/preview
-    name = f"{Day()}" if schedule == 'daily' else 'week {Day().week_number()}'
-    cache_file = Path(__file__).parent / "cache" / f"{name}.html"
+    cache_file = Path(cache_file_prefix(schedule) + ".html")
+
     with open(cache_file, "w", encoding="utf-8") as f:
         f.write(html_email)
-    print(f"HTML e-mail opgeslagen als {name}.html")
+    print(f"HTML e-mail opgeslagen als {cache_file.stem}.html")
     return html_email

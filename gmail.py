@@ -11,6 +11,8 @@ from pathlib import Path
 
 from justdays import Day
 
+from database import cache_file_prefix
+
 FILTER_ON_LABEL='ai_news'
 # SELECTED_SENDERS = [
 # 'aitidbits+ai-coding@substack.com',
@@ -40,30 +42,63 @@ class Mail:
         Delete a sent email by its Message-ID.
         Returns True if deleted, False otherwise.
         """
-        if not self.mail:
-            if not self.connect():
+        try:
+            if not self.mail:
+                if not self.connect():
+                    print("Failed to connect to IMAP server")
+                    return False
+
+            # Try different Gmail folder names for different locales
+            folder_names = ['"[Gmail]/Sent Mail"', '"[Gmail]/Verzonden items"', 'Sent']
+            sent_folder = None
+
+            for folder in folder_names:
+                try:
+                    status, _ = self.mail.select(folder, readonly=False)
+                    if status == 'OK':
+                        sent_folder = folder
+                        break
+                except:
+                    continue
+
+            if not sent_folder:
+                print("Could not access any Sent folder")
                 return False
 
-        # Select the Sent folder
-        status, _ = self.mail.select('"[Gmail]/Sent Mail"', readonly=False)
-        if status != 'OK':
-            print("Failed to access Sent folder")
+            # Search for the email by Message-ID
+            status, email_ids = self.mail.search(None, f'(HEADER Message-ID "{message_id}")')
+            if status != 'OK' or not email_ids or not email_ids[0]:
+                print(f"Email with Message-ID {message_id} not found in {sent_folder}")
+                return False
+
+            # Delete the found email(s) - should be just one
+            deleted_count = 0
+            for email_id in email_ids[0].split():
+                # Mark as deleted
+                status, _ = self.mail.store(email_id, '+FLAGS', '\\Deleted')
+                if status == 'OK':
+                    deleted_count += 1
+
+            if deleted_count > 0:
+                # Expunge the deleted emails
+                self.mail.expunge()
+                return True
+            else:
+                print(f"Failed to mark email with Message-ID {message_id} for deletion")
+                return False
+
+        except Exception as e:
+            print(f"Error deleting email with Message-ID {message_id}: {str(e)}")
             return False
-
-        # Search for the email by Message-ID
-        status, email_ids = self.mail.search(None, f'(HEADER Message-ID "{message_id}")')
-        if status != 'OK' or not email_ids or not email_ids[0]:
-            print(f"Email with Message-ID {message_id} not found in Sent folder")
-            return False
-
-        # Delete the found email(s) - should be just one
-        for email_id in email_ids[0].split():
-            self.mail.store(email_id, "-X-GM-LABELS", '("reading-list")')
-            self.mail.store(email_id, '+FLAGS', '\\Deleted')
-
-        # Expunge the deleted email
-        self.mail.expunge()
-        return True
+        finally:
+            # Close the connection after each operation
+            try:
+                if self.mail:
+                    self.mail.close()
+                    self.mail.logout()
+                    self.mail = None
+            except:
+                pass
 
 
     def get_emails(self):
@@ -215,8 +250,7 @@ class Mail:
 
 
 def get_raw_mail_text(schedule: str, cached: bool=False, verbose: bool=False):
-    name = f"{Day()}" if schedule == 'daily' else 'week {Day().week_number()}'
-    cache_file = Path(__file__).parent / 'cache' / f'{name}_emails.txt'
+    cache_file = Path(cache_file_prefix(schedule) + '_emails.txt')
 
     if cached and cache_file.is_file():
         with open(cache_file, 'r', encoding='utf-8') as f:
