@@ -37,93 +37,104 @@ class Mail:
             print(f"Failed to connect to IMAP server: {str(e)}")
             return False
 
-    def delete_sent_email_by_message_id(self, message_id):
-        """
-        Delete a sent email by its Message-ID.
-        Returns True if deleted, False otherwise.
-        """
+    # def delete_sent_email_by_message_id(self, message_id):
+    #     """
+    #     Delete a sent email by its Message-ID.
+    #     Returns True if deleted, False otherwise.
+    #     """
+    #     try:
+    #         if not self.mail:
+    #             if not self.connect():
+    #                 print("Failed to connect to IMAP server")
+    #                 return False
+    #
+    #         # Try different Gmail folder names for different locales
+    #         folder_names = ['"[Gmail]/Sent Mail"', '"[Gmail]/Verzonden items"', 'Sent']
+    #         sent_folder = None
+    #
+    #         for folder in folder_names:
+    #             try:
+    #                 status, _ = self.mail.select(folder, readonly=False)
+    #                 if status == 'OK':
+    #                     sent_folder = folder
+    #                     break
+    #             except:
+    #                 continue
+    #
+    #         if not sent_folder:
+    #             print("Could not access any Sent folder")
+    #             return False
+    #
+    #         # Search for the email by Message-ID
+    #         status, email_ids = self.mail.search(None, f'(HEADER Message-ID "{message_id}")')
+    #         if status != 'OK' or not email_ids or not email_ids[0]:
+    #             print(f"Email with Message-ID {message_id} not found in {sent_folder}")
+    #             return False
+    #
+    #         # Delete the found email(s) - should be just one
+    #         deleted_count = 0
+    #         for email_id in email_ids[0].split():
+    #             # Mark as deleted
+    #             status, _ = self.mail.store(email_id, '+FLAGS', '\\Deleted')
+    #             if status == 'OK':
+    #                 deleted_count += 1
+    #
+    #         if deleted_count > 0:
+    #             # Expunge the deleted emails
+    #             self.mail.expunge()
+    #             return True
+    #         else:
+    #             print(f"Failed to mark email with Message-ID {message_id} for deletion")
+    #             return False
+    #
+    #     except Exception as e:
+    #         print(f"Error deleting email with Message-ID {message_id}: {str(e)}")
+    #         return False
+    #     finally:
+    #         # Close the connection after each operation
+    #         try:
+    #             if self.mail:
+    #                 self.mail.close()
+    #                 self.mail.logout()
+    #                 self.mail = None
+    #         except:
+    #             pass
+
+    def delete_email(self, email_uid):
+        """Move an email to trash."""
         try:
-            if not self.mail:
-                if not self.connect():
-                    print("Failed to connect to IMAP server")
-                    return False
-
-            # Try different Gmail folder names for different locales
-            folder_names = ['"[Gmail]/Sent Mail"', '"[Gmail]/Verzonden items"', 'Sent']
-            sent_folder = None
-
-            for folder in folder_names:
-                try:
-                    status, _ = self.mail.select(folder, readonly=False)
-                    if status == 'OK':
-                        sent_folder = folder
-                        break
-                except:
-                    continue
-
-            if not sent_folder:
-                print("Could not access any Sent folder")
-                return False
-
-            # Search for the email by Message-ID
-            status, email_ids = self.mail.search(None, f'(HEADER Message-ID "{message_id}")')
-            if status != 'OK' or not email_ids or not email_ids[0]:
-                print(f"Email with Message-ID {message_id} not found in {sent_folder}")
-                return False
-
-            # Delete the found email(s) - should be just one
-            deleted_count = 0
-            for email_id in email_ids[0].split():
-                # Mark as deleted
-                status, _ = self.mail.store(email_id, '+FLAGS', '\\Deleted')
-                if status == 'OK':
-                    deleted_count += 1
-
-            if deleted_count > 0:
-                # Expunge the deleted emails
+            result = self.mail.uid('copy', email_uid, '[Gmail]/Trash')
+            if result[0] == 'OK':
+                self.mail.uid('store', email_uid, '+FLAGS', '\\Deleted')
                 self.mail.expunge()
                 return True
-            else:
-                print(f"Failed to mark email with Message-ID {message_id} for deletion")
-                return False
-
-        except Exception as e:
-            print(f"Error deleting email with Message-ID {message_id}: {str(e)}")
             return False
-        finally:
-            # Close the connection after each operation
-            try:
-                if self.mail:
-                    self.mail.close()
-                    self.mail.logout()
-                    self.mail = None
-            except:
-                pass
-
+        except Exception:
+            return False
 
     def get_emails(self):
-        """Retrieve all email IDs from the specified label."""
+        """Retrieve all email UIDs from the specified label."""
         try:
             status, _ = self.mail.select(FILTER_ON_LABEL, readonly=False)
             if status != 'OK':
                 print(f"Failed to access label: {FILTER_ON_LABEL}")
                 return []
 
-            status, email_ids = self.mail.search(None, 'ALL')
-            if status != 'OK' or not email_ids or not email_ids[0]:
+            status, email_uids = self.mail.uid('search', None, 'ALL')
+            if status != 'OK' or not email_uids or not email_uids[0]:
                 print(f"No emails found in label: {FILTER_ON_LABEL}")
                 return []
 
-            return email_ids[0].split()
+            return email_uids[0].split()
         except Exception as e:
             print(f"Error getting emails: {str(e)}")
             return []
 
-    def get_email_details(self, email_id):
+    def get_email_details(self, email_uid):
         """Get the sender, date, subject, and flags of an email."""
         try:
             # First fetch the flags to check if the email is starred
-            status, flags_data = self.mail.fetch(email_id, '(FLAGS)')
+            status, flags_data = self.mail.uid('fetch', email_uid, '(FLAGS)')
             if status != 'OK' or not flags_data:
                 return None
             
@@ -151,7 +162,7 @@ class Mail:
             is_starred = any(flag.lower() in ['flagged', 'starred', 'star', 'important'] for flag in flags)
             
             # Now fetch the email headers
-            status, msg_data = self.mail.fetch(email_id, '(BODY.PEEK[HEADER.FIELDS (FROM DATE SUBJECT)])')
+            status, msg_data = self.mail.uid('fetch', email_uid, '(BODY.PEEK[HEADER.FIELDS (FROM DATE SUBJECT)])')
             if status != 'OK' or not msg_data or not isinstance(msg_data[0], tuple):
                 return None
 
@@ -187,7 +198,7 @@ class Mail:
                     pass
 
             return {
-                'id': email_id,
+                'id': email_uid,
                 'sender_name': sender_name,
                 'sender_email': sender_email,
                 'date': date,
@@ -197,18 +208,18 @@ class Mail:
         except Exception:
             return None
 
-    def get_email_body(self, email_id):
+    def get_email_body(self, email_uid):
         """
-        Get the email body for a given email ID.
-        
+        Get the email body for a given email UID.
+
         Args:
-            email_id: The ID of the email to retrieve
-            
+            email_uid: The UID of the email to retrieve
+
         Returns:
             str: The email body text or None if not found
         """
         try:
-            status, msg_data = self.mail.fetch(email_id, '(RFC822)')
+            status, msg_data = self.mail.uid('fetch', email_uid, '(RFC822)')
             if status != 'OK' or not msg_data or not isinstance(msg_data[0], tuple):
                 return None
                 
@@ -237,6 +248,138 @@ class Mail:
             
         except Exception as e:
             print(f"Error getting email body: {str(e)}")
+            return None
+
+    def get_undelivered(self) -> list[dict[str, str]]:
+        """
+        Get undelivered emails from Mail Delivery Subsystem.
+
+        Returns:
+            List of dicts with 'email_id' and 'recipient_email' keys
+        """
+        try:
+            if not self.mail:
+                if not self.connect():
+                    print('Failed to connect to IMAP server')
+                    return []
+
+            # Select inbox
+            status, _ = self.mail.select('INBOX', readonly=True)
+            if status != 'OK':
+                print('Failed to access INBOX')
+                return []
+
+            # Search for emails from Mail Delivery Subsystem or Mail Delivery System
+            status, email_uids = self.mail.uid('search', None, '(OR (FROM "Mail Delivery Subsystem") (FROM "Mail Delivery System"))')
+            if status != 'OK' or not email_uids or not email_uids[0]:
+                return []
+
+            undelivered_emails = []
+
+            for email_uid in email_uids[0].split():
+                # Get the full email message
+                status, msg_data = self.mail.uid('fetch', email_uid, '(RFC822)')
+                if status != 'OK' or not msg_data or not isinstance(msg_data[0], tuple):
+                    continue
+
+                msg = email.message_from_bytes(msg_data[0][1])
+
+                # Extract the original recipient from the bounce message
+                recipient_info = self._extract_original_recipient(msg)
+                if recipient_info and recipient_info.get('recipient_email'):
+                    undelivered_emails.append({
+                        'email_id': email_uid.decode('utf-8'),
+                        'recipient_email': recipient_info['recipient_email'],
+                        'is_spam_rejection': recipient_info.get('is_spam_rejection', False)
+                    })
+
+            return undelivered_emails
+
+        except Exception as e:
+            print(f'Error getting undelivered emails: {str(e)}')
+            return []
+
+    def _extract_original_recipient(self, msg) -> dict | None:
+        """
+        Extract the original recipient email from a bounce message.
+
+        Args:
+            msg: Email message object
+
+        Returns:
+            Dict with 'recipient_email' and 'is_spam_rejection' keys, or None if not found
+        """
+        try:
+            # Check various headers that might contain the original recipient
+            headers_to_check = [
+                'Final-Recipient',
+                'Original-Recipient',
+                'X-Failed-Recipients'
+            ]
+
+            for header in headers_to_check:
+                value = msg.get(header, '')
+                if value:
+                    # Extract email from header value (format might be 'rfc822;email@domain.com')
+                    import re
+                    email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', value)
+                    if email_match:
+                        return {
+                            'recipient_email': email_match.group(),
+                            'is_spam_rejection': False
+                        }
+
+            # If headers don't contain the info, search in the message body
+            body = None
+            if msg.is_multipart():
+                for part in msg.walk():
+                    if part.get_content_type() == 'text/plain':
+                        body = part.get_payload(decode=True).decode('utf-8', errors='ignore')
+                        break
+            else:
+                body = msg.get_payload(decode=True).decode('utf-8', errors='ignore')
+
+            if body:
+                import re
+
+                # Check if this is a spam filter rejection
+                spam_indicators = [
+                    r'listed on.*spamrl\.com',
+                    r'URL.*is listed',
+                    r'spam.*filter',
+                    r'blacklist',
+                    r'blocked.*spam'
+                ]
+
+                is_spam_rejection = any(
+                    re.search(indicator, body, re.IGNORECASE)
+                    for indicator in spam_indicators
+                )
+
+                # Look for patterns to extract recipient email from bounce messages
+                patterns = [
+                    # Gmail delivery incomplete pattern: "delivering your message to email@domain.com"
+                    r'delivering your message to\s+([\w\.-]+@[\w\.-]+\.\w+)',
+                    # Standard bounce patterns
+                    r'(?:failed|error|bounce).*?[\s:]+([\w\.-]+@[\w\.-]+\.\w+)',
+                    r'(?:recipient|address).*?[\s:]+([\w\.-]+@[\w\.-]+\.\w+)',
+                    r'<([\w\.-]+@[\w\.-]+\.\w+)>.*?(?:failed|error|bounce)',
+                    r'([\w\.-]+@[\w\.-]+\.\w+).*?(?:failed|error|bounce|undelivered)',
+                    # Generic email address pattern as fallback
+                    r'([\w\.-]+@[\w\.-]+\.\w+)'
+                ]
+
+                for pattern in patterns:
+                    matches = re.findall(pattern, body, re.IGNORECASE | re.MULTILINE)
+                    if matches:
+                        return {
+                            'recipient_email': matches[0],
+                            'is_spam_rejection': is_spam_rejection
+                        }
+
+            return None
+
+        except Exception:
             return None
 
     def close(self):
@@ -293,8 +436,8 @@ def get_raw_mail_text(schedule: str, cached: bool=False, verbose: bool=False):
                 email_date = email_date.replace(tzinfo=timezone.utc)
             if email_date >= from_date:
                 sender_name = decode_email_header(details['sender_name'])
+                subject = decode_email_header(details['subject'])
                 if verbose:
-                    subject = decode_email_header(details['subject'])
                     print(f"{sender_name} {details['sender_email']} - {details['date']} - {subject}")
                 body = mail.get_email_body(email_id)
                 text += '==================================================\n' + \

@@ -57,11 +57,12 @@ INPUT
 
 SELECTIE- EN RANGSCHIKKINGSCriteria
 - Sorteer op belangrijkheid voor professionals die AI toepassen:
-  1) Ontwikkelingen uit de grote AI-labs en platformreleases
-  2) Alles m.b.t. het bouwen en uitrollen van AI-applicaties 
-  3) Items die de originele nieuwsbrief zelf als belangrijk markeert
-  4) Regelgeving en compliance-updates die directe impact hebben
-  5) Significante onderzoeksresultaten met praktische toepasbaarheid
+  1) Artikelen die direct actionable zijn voor mensen die AI willen inzetten in hun organisatie
+  2) Ontwikkelingen uit de grote AI-labs en platformreleases
+  3) Alles m.b.t. het bouwen en uitrollen van AI-applicaties 
+  4) Items die de originele nieuwsbrief zelf als belangrijk markeert
+  5) Regelgeving en compliance-updates die directe impact hebben
+  6) Significante onderzoeksresultaten met praktische toepasbaarheid
 - SKIP: hype zonder substance, speculatieve toekomstvisies, commerciële uitingen, persoonlijke meningen zonder feiten
 - Bundel/dedup items die over hetzelfde gaan.
 - Bewaar maximaal [MAX_ARTICLES] items

@@ -1,34 +1,71 @@
 import os
 from typing import List
-from sqlalchemy import create_engine, MetaData, select, text, func
+from contextlib import contextmanager
+from sqlalchemy import create_engine, MetaData, select, update
 from dotenv import load_dotenv
 
 
-def get_subscribers(status: str) -> List[str]:
+@contextmanager
+def db():
+    """
+    Context manager that provides database connection and metadata tables.
+
+    Usage:
+        with db() as (conn, tables):
+            # use conn and tables
+    """
     db_url = _normalize_db_url(os.getenv("DATABASE_URL"))
     if not db_url:
         raise ValueError("DATABASE_URL environment variable not set or invalid")
-    
+
     engine = create_engine(db_url)
     metadata = MetaData()
     metadata.reflect(bind=engine)
-    
-    if 'nieuwsbrief_subscriber' not in metadata.tables:
-        raise ValueError("Subscriber table not found in database")
-    
-    subscriber_table = metadata.tables['nieuwsbrief_subscriber']
-    
+
     try:
         with engine.connect() as conn:
+            yield conn, metadata.tables
+    finally:
+        engine.dispose()
+
+
+def get_subscribers(status: str) -> List[str]:
+    try:
+        with db() as (conn, tables):
+            subscriber_table = tables['nieuwsbrief_subscriber']
             query = select(subscriber_table.c.email).where(
                 subscriber_table.c.status == status,
                 subscriber_table.c.email.isnot(None)
             )
             result = conn.execute(query)
             return [row[0] for row in result if row[0]]
-            
+
     except Exception as e:
         raise Exception(f"Error getting subscribers: {e}")
+
+
+def update_subscription(email: str, status: str) -> bool:
+    """
+    Update subscriber status.
+
+    Args:
+        email: Subscriber email address
+        status: New status for the subscriber
+
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        with db() as (conn, tables):
+            subscriber_table = tables['nieuwsbrief_subscriber']
+
+            with conn.begin():
+                query = update(subscriber_table).where(subscriber_table.c.email == email).values(status=status)
+                result = conn.execute(query)
+                return result.rowcount > 0
+
+    except Exception:
+        return False
 
 
 def _normalize_db_url(db_url: str) -> str:

@@ -94,7 +94,7 @@ def delete_sent_email(message_id: str) -> bool:
         # Remove angle brackets if present
         message_id = message_id.strip('<>')
 
-        if mail.delete_sent_email_by_message_id(message_id):
+        if mail.delete_email(message_id):
             print(f"✓ Deleted sent email with Message-ID: {message_id}")
             return True
         else:
@@ -195,8 +195,8 @@ def send_newsletter(schedule: str, newsletter_html: str, title: str):
 
     # Delete sent emails after a delay to allow Gmail to process them
     if message_ids_to_delete:
-        print(f"Waiting 30 seconds before deleting {len(message_ids_to_delete)} sent emails...")
-        time.sleep(30)
+        print(f"Waiting 10 seconds before deleting {len(message_ids_to_delete)} sent emails...")
+        time.sleep(10)
 
         deleted_count = 0
         for message_id in message_ids_to_delete:
