@@ -9,9 +9,8 @@ from email.utils import parseaddr, parsedate_to_datetime
 from email.header import decode_header
 from pathlib import Path
 
-from justdays import Day
-
 from database import cache_file_prefix
+from log import lg
 
 FILTER_ON_LABEL='ai_news'
 # SELECTED_SENDERS = [
@@ -34,71 +33,8 @@ class Mail:
             self.mail.login(self.email_user, self.email_pass)
             return True
         except Exception as e:
-            print(f"Failed to connect to IMAP server: {str(e)}")
+            lg().info(f"Failed to connect to IMAP server: {str(e)}")
             return False
-
-    # def delete_sent_email_by_message_id(self, message_id):
-    #     """
-    #     Delete a sent email by its Message-ID.
-    #     Returns True if deleted, False otherwise.
-    #     """
-    #     try:
-    #         if not self.mail:
-    #             if not self.connect():
-    #                 print("Failed to connect to IMAP server")
-    #                 return False
-    #
-    #         # Try different Gmail folder names for different locales
-    #         folder_names = ['"[Gmail]/Sent Mail"', '"[Gmail]/Verzonden items"', 'Sent']
-    #         sent_folder = None
-    #
-    #         for folder in folder_names:
-    #             try:
-    #                 status, _ = self.mail.select(folder, readonly=False)
-    #                 if status == 'OK':
-    #                     sent_folder = folder
-    #                     break
-    #             except:
-    #                 continue
-    #
-    #         if not sent_folder:
-    #             print("Could not access any Sent folder")
-    #             return False
-    #
-    #         # Search for the email by Message-ID
-    #         status, email_ids = self.mail.search(None, f'(HEADER Message-ID "{message_id}")')
-    #         if status != 'OK' or not email_ids or not email_ids[0]:
-    #             print(f"Email with Message-ID {message_id} not found in {sent_folder}")
-    #             return False
-    #
-    #         # Delete the found email(s) - should be just one
-    #         deleted_count = 0
-    #         for email_id in email_ids[0].split():
-    #             # Mark as deleted
-    #             status, _ = self.mail.store(email_id, '+FLAGS', '\\Deleted')
-    #             if status == 'OK':
-    #                 deleted_count += 1
-    #
-    #         if deleted_count > 0:
-    #             # Expunge the deleted emails
-    #             self.mail.expunge()
-    #             return True
-    #         else:
-    #             print(f"Failed to mark email with Message-ID {message_id} for deletion")
-    #             return False
-    #
-    #     except Exception as e:
-    #         print(f"Error deleting email with Message-ID {message_id}: {str(e)}")
-    #         return False
-    #     finally:
-    #         # Close the connection after each operation
-    #         try:
-    #             if self.mail:
-    #                 self.mail.close()
-    #                 self.mail.logout()
-    #                 self.mail = None
-    #         except:
-    #             pass
 
     def delete_email(self, email_uid):
         """Move an email to trash."""
@@ -117,17 +53,17 @@ class Mail:
         try:
             status, _ = self.mail.select(FILTER_ON_LABEL, readonly=False)
             if status != 'OK':
-                print(f"Failed to access label: {FILTER_ON_LABEL}")
+                lg().error(f"Failed to access label: {FILTER_ON_LABEL}")
                 return []
 
             status, email_uids = self.mail.uid('search', None, 'ALL')
             if status != 'OK' or not email_uids or not email_uids[0]:
-                print(f"No emails found in label: {FILTER_ON_LABEL}")
+                lg().error(f"No emails found in label: {FILTER_ON_LABEL}")
                 return []
 
             return email_uids[0].split()
         except Exception as e:
-            print(f"Error getting emails: {str(e)}")
+            lg().error(f"Error getting emails: {str(e)}")
             return []
 
     def get_email_details(self, email_uid):
@@ -247,7 +183,7 @@ class Mail:
             return body
             
         except Exception as e:
-            print(f"Error getting email body: {str(e)}")
+            lg().error(f"Error getting email body: {str(e)}")
             return None
 
     def get_undelivered(self) -> list[dict[str, str]]:
@@ -260,13 +196,13 @@ class Mail:
         try:
             if not self.mail:
                 if not self.connect():
-                    print('Failed to connect to IMAP server')
+                    lg().error('Failed to connect to IMAP server')
                     return []
 
             # Select inbox
             status, _ = self.mail.select('INBOX', readonly=True)
             if status != 'OK':
-                print('Failed to access INBOX')
+                lg().error('Failed to access INBOX')
                 return []
 
             # Search for emails from Mail Delivery Subsystem or Mail Delivery System
@@ -296,7 +232,7 @@ class Mail:
             return undelivered_emails
 
         except Exception as e:
-            print(f'Error getting undelivered emails: {str(e)}')
+            lg().error(f'Error getting undelivered emails: {str(e)}')
             return []
 
     def _extract_original_recipient(self, msg) -> dict | None:
@@ -397,17 +333,17 @@ def get_raw_mail_text(schedule: str, cached: bool=False, verbose: bool=False):
 
     if cached and cache_file.is_file():
         with open(cache_file, 'r', encoding='utf-8') as f:
-            print("Using cached emails")
+            lg().info("Using cached emails")
             return f.read()
 
-    print("Connecting to email ...")
+    lg().info("Connecting to email ...")
     mail = Mail()
     
     if not mail.connect():
-        print("Failed to connect to the email server.")
+        lg().error("Failed to connect to the email server.")
         return
 
-    print("Fetching emails ...")
+    lg().info("Fetching emails ...")
     email_ids = mail.get_emails()
     if not email_ids:
         return
@@ -438,7 +374,7 @@ def get_raw_mail_text(schedule: str, cached: bool=False, verbose: bool=False):
                 sender_name = decode_email_header(details['sender_name'])
                 subject = decode_email_header(details['subject'])
                 if verbose:
-                    print(f"{sender_name} {details['sender_email']} - {details['date']} - {subject}")
+                    lg().info(f"{sender_name} {details['sender_email']} - {details['date']} - {subject}")
                 body = mail.get_email_body(email_id)
                 text += '==================================================\n' + \
                 f"Source: {sender_name} {details['sender_email']}\n" + \

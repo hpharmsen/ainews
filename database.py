@@ -8,6 +8,8 @@ from sqlalchemy import create_engine, MetaData, text, select, desc, func, and_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from justdays import Day
 
+from log import lg
+
 
 def normalize_db_url(db_url):
     """Ensure the database URL uses the postgresql:// scheme."""
@@ -28,7 +30,6 @@ def db_connect():
         # Test the connection
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
-            print("Successfully connected to the database")
 
         metadata = MetaData()
         metadata.reflect(bind=engine)
@@ -40,8 +41,7 @@ def db_connect():
         return engine, newsletter_table
 
     except Exception as e:
-        print(f"Error connecting to the database: {e}")
-        print(f"Database URL: {db_url}")
+        lg().error(f"Error connecting to the database: {e}\nDatabase URL: {db_url}")
         sys.exit(1)
 
 
@@ -77,7 +77,7 @@ def add_to_database(schedule, title, newsletter_html, image_url):
         )
         conn.execute(insert_stmt)
     
-    print(f"✅ Nieuwsbrief toegevoegd aan de database (heeft eventuele bestaande voor {now.date()} vervangen).")
+    lg().info(f"✅ Nieuwsbrief toegevoegd aan de database (heeft eventuele bestaande voor {now.date()} vervangen).")
 
 
 def     get_last_newsletter_texts(schedule: str, limit: int = 1) -> str:

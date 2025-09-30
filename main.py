@@ -9,6 +9,7 @@ from justdays import Day
 
 from ai import generate_ai_summary, generate_ai_image
 from formatter import create_html_email
+from log import setup_logging, lg
 from mailer import send_newsletter
 
 VERBOSE = True
@@ -57,7 +58,9 @@ def create_title(schedule: str) -> str:
 if __name__ == '__main__':
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
     load_dotenv(override=True)
+    setup_logging('data/app.log')
 
+    lg().info("============ Starting application ============")
     schedule, use_cached = parse_command_line()
     text = get_raw_mail_text(schedule, cached=use_cached, verbose=VERBOSE)
     articles = generate_ai_summary(schedule, text, cached=use_cached, verbose=VERBOSE)

@@ -11,6 +11,7 @@ from justdays import Day
 
 from database import get_last_newsletter_texts, cache_file_prefix
 from s3 import S3
+from log import lg
 
 COPY_WRITE_MODEL = 'gemini-2.5-pro'
 COPY_WRITE_MODEL_NAME = 'Gemini 2.5 Pro'
@@ -162,7 +163,7 @@ def generate_ai_summary(schedule: str, text: str, verbose=False, cached=True):
         with open(cache_file, "r", encoding="utf-8") as f:
             summary = [json.loads(line) for line in f]
             if verbose:
-                print("Loaded summary from cache\n")
+                lg().info("Loaded summary from cache")
             return summary
 
     # Generate new summary
@@ -174,7 +175,7 @@ def generate_ai_summary(schedule: str, text: str, verbose=False, cached=True):
                  .replace('[LATEST_NEWSLETTERS]', latest_newsletters)\
                  .replace('[NEWS_EMAILS]', text)
     tokens = model.token_count(prompt)
-    print('\nGenerating summary...')
+    lg().info('\nGenerating summary...')
     for _ in range(3):
         try:
             summary = model.prompt(prompt, return_json=True, cached=True)
@@ -185,15 +186,15 @@ def generate_ai_summary(schedule: str, text: str, verbose=False, cached=True):
         summary = model.prompt(prompt, return_json=True, cached=True)
 
     # Check the urls by opening them and see if they return a proper web page
-    print('\nChecking links ...')
+    lg().info('\nChecking links ...')
     for item in summary:
         for link in list(item['links']):
             resolved = check_and_resolve_url(link)
             if resolved is None:
-                print(f'Link {link} is not valid')
+                lg().warning(f'Link {link} is not valid')
                 item['links'].remove(link)
             elif resolved != link:
-                print(f'Redirected {link} -> {resolved}')
+                lg().info(f'Redirected {link} -> {resolved}')
                 try:
                     idx = item['links'].index(link)
                     item['links'][idx] = resolved
@@ -207,11 +208,11 @@ def generate_ai_summary(schedule: str, text: str, verbose=False, cached=True):
 
     if verbose:
         for line in summary:
-            print(line['title'])
-            print(line['summary'])
+            lg().info(line['title'])
+            lg().info(line['summary'])
             for link in line['links']:
-                print(link)
-            print()
+                lg().info(link)
+            lg().info('')
 
     return summary
 
@@ -227,49 +228,49 @@ def generate_ai_image(articles: list[dict], schedule: str, cached: bool, max_ret
     shadow_out_path = os.path.join("cache", shadow_img_name)
 
     if cached and os.path.isfile(out_path):
-        print('Loading image from cache')
+        lg().info('Loading image from cache')
         article_index = 0
     else:
-        print('Selecting article for image...')
+        lg().info('Selecting article for image...')
         article_index: int
         article_index, description = select_article_for_image(articles)
         prompt = create_image_prompt(articles[article_index], description, schedule)
 
-        print('Generating image...')
+        lg().info('Generating image...')
         model = Model(DESIGN_MODEL)
         shadow_model = Model('reve')
         # Retry logic with exponential backoff
         for attempt in range(max_retries):
             try:
                 if attempt > 0:
-                    print(f'Generating image (attempt {attempt + 1}/{max_retries})...')
+                    lg().warning(f'Generating image (attempt {attempt + 1}/{max_retries})...')
 
                 try:
                     options = {"aspect_ratio": "16:9"}
                     img = shadow_model.generate_image(prompt, STYLE_IMAGES, options=options, size=(600, 300))
                     img.save(shadow_out_path, format="PNG")
                 except:
-                    print("Failed to generate shadow image")
+                    lg().error("Failed to generate shadow image")
 
                 img = model.generate_image(prompt, STYLE_IMAGES, size=(600, 300))
                 img.save(out_path, format="PNG")
-                print('Image generated successfully')
+                lg().info('Image generated successfully')
 
                 break
                 
             except (httpx.ReadTimeout, TimeoutError) as e:
                 if attempt == max_retries - 1:  # Last attempt
-                    print(f'Failed to generate image after {max_retries} attempts')
+                    lg().error(f'Failed to generate image after {max_retries} attempts')
                     raise Exception(f'Image generation timed out after {max_retries} attempts') from e
                     
-                print(f'Timeout occurred, retrying...')
+                lg().warning(f'Timeout occurred, retrying...')
                 time.sleep(1)
                 
             except Exception as e:
                 if attempt == max_retries - 1:  # Last attempt
-                    print(f'Failed to generate image: {str(e)}')
+                    lg().error(f'Failed to generate image: {str(e)}')
                     raise
-                print(f'Error generating image: {str(e)}. Retrying...')
+                lg().error(f'Error generating image: {str(e)}. Retrying...')
                 time.sleep(5)  # Shorter delay for non-timeout errors
 
     # Upload to S3
@@ -279,7 +280,7 @@ def generate_ai_image(articles: list[dict], schedule: str, cached: bool, max_ret
             url = s3.add(out_path, 'nieuwsbrief/' + out_path.name)
             return article_index, url
         except Exception as e:
-            print(f'Error uploading to S3, retrying... (attempt {attempt + 1}/3)')
+            lg().error(f'Error uploading to S3, retrying... (attempt {attempt + 1}/3)')
             time.sleep(5 * (attempt + 1))  # Exponential backoff for S3 upload
     raise TimeoutError('Failed to upload image to S3 after 3 attempts')
 
@@ -314,7 +315,7 @@ def create_image_prompt(article, description, schedule):
         with open(cache_file, 'r', encoding='utf-8') as f:
             return f.read()
 
-    print('Generating image prompt...')
+    lg().info('Generating image prompt...')
     if schedule == "daily":
         color = COLORS[Day().day_of_week()]
     else:
@@ -356,7 +357,7 @@ def retry_prompt(model, prompt) -> dict:
             res = model.prompt(prompt, return_json=True, cached=False)
             return res
         except RatelimitException:
-            print('Hitting rate limit, retrying...')
+            lg().warning('Hitting rate limit, retrying...')
             time.sleep(5)
     else:
         raise RatelimitException

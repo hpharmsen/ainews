@@ -9,3 +9,4 @@
 .envrc
 .idea/
 __pycache__/
+/data/app.log
