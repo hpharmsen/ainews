@@ -41,7 +41,7 @@ def db_connect():
         return engine, newsletter_table
 
     except Exception as e:
-        lg().error(f"Error connecting to the database: {e}\nDatabase URL: {db_url}")
+        lg.error(f"Error connecting to the database: {e}\nDatabase URL: {db_url}")
         sys.exit(1)
 
 
@@ -77,7 +77,7 @@ def add_to_database(schedule, title, newsletter_html, image_url):
         )
         conn.execute(insert_stmt)
     
-    lg().info(f"✅ Nieuwsbrief toegevoegd aan de database (heeft eventuele bestaande voor {now.date()} vervangen).")
+    lg.info(f"✅ Nieuwsbrief toegevoegd aan de database (heeft eventuele bestaande voor {now.date()} vervangen).")
 
 
 def     get_last_newsletter_texts(schedule: str, limit: int = 1) -> str:

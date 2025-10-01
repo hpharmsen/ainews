@@ -39,14 +39,14 @@ def logged_in_smtp():
         server.login(username, password)
         yield server
     except Exception as e:
-        lg().error(f"SMTP Error: {e}")
+        lg.error(f"SMTP Error: {e}")
         raise
     finally:
         if server:
             try:
                 server.quit()
             except Exception as e:
-                lg().error(f"Error closing SMTP connection: {e}")
+                lg.error(f"Error closing SMTP connection: {e}")
 
 
 def create_message(recipient: str, subject: str, html_content: str, reply_to: str) -> MIMEMultipart:
@@ -93,7 +93,7 @@ def delete_email(message_id: str) -> bool:
     try:
         mail = Mail()
     except Exception as e:
-        lg().error(f"✗ Error connecting to IMAP server while trying to an email\n{str(e)}")
+        lg.error(f"✗ Error connecting to IMAP server while trying to an email\n{str(e)}")
         return False
     message_id = message_id.strip('<>') # Remove angle brackets if present
     return mail.delete_email(message_id)
@@ -165,7 +165,7 @@ def send_newsletter(schedule: str, newsletter_html: str, title: str):
 
                 # Send the email
                 server.sendmail(DISPLAY_FROM_EMAIL, [recipient], msg.as_string())
-                lg().info(f"Email sent to {recipient}")
+                lg.info(f"Email sent to {recipient}")
 
                 # Collect Message-ID for later deletion (if not @harmsen.nl)
                 if '@harmsen.nl' not in recipient.lower():
@@ -176,17 +176,17 @@ def send_newsletter(schedule: str, newsletter_html: str, title: str):
 
                 # Rate limiting
                 if i % BATCH_SIZE == 0 and i < len(subscribers):
-                    lg().info(f"Sent {i} emails, pausing for 60 seconds...")
+                    lg.info(f"Sent {i} emails, pausing for 60 seconds...")
                     time.sleep(60)
                 else:
                     time.sleep(1)  # Small delay between emails
 
             except Exception as e:
-                lg().error(f"Error sending to {recipient}: {str(e)}")
+                lg.error(f"Error sending to {recipient}: {str(e)}")
 
     # Delete sent emails after a delay to allow Gmail to process them
     if message_ids_to_delete:
-        lg().info(f"Waiting 10 seconds before deleting {len(message_ids_to_delete)} sent emails...")
+        lg.info(f"Waiting 10 seconds before deleting {len(message_ids_to_delete)} sent emails...")
         time.sleep(10)
 
         deleted_count = 0
@@ -195,8 +195,8 @@ def send_newsletter(schedule: str, newsletter_html: str, title: str):
                 deleted_count += 1
             time.sleep(1)  # Small delay between deletions
 
-        lg().info(f"Successfully deleted {deleted_count}/{len(message_ids_to_delete)} sent emails")
+        lg.info(f"Successfully deleted {deleted_count}/{len(message_ids_to_delete)} sent emails")
 
-    lg().info(f"Newsletter sending completed. Sent to {len(subscribers)} recipients.")
+    lg.info(f"Newsletter sending completed. Sent to {len(subscribers)} recipients.")
     mailerlog()
     update_last_sent_timestamp(schedule)

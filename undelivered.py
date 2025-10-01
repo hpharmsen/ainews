@@ -27,18 +27,18 @@ def save_undelivered_data(data: dict[str, int]) -> None:
 def get_mail():
     mail = Mail()
     if not mail.connect():
-        lg().error('Failed to connect to email server')
+        lg.error('Failed to connect to email server')
         exit(1)
     return mail
 
 
 def get_undelivered_emails(mail: Mail) -> list[dict[str, str]]:
-    lg().info("Retrieving undelivered emails...")
+    lg.info("Retrieving undelivered emails...")
     undelivered_emails = mail.get_undelivered()
     if not undelivered_emails:
-        lg().info("No undelivered emails found")
+        lg.info("No undelivered emails found")
         exit(0)
-    lg().info(f"Found {len(undelivered_emails)} undelivered emails")
+    lg.info(f"Found {len(undelivered_emails)} undelivered emails")
     return undelivered_emails
 
 
@@ -59,7 +59,7 @@ def parse_undelivered_emails(undelivered_emails):
         if is_spam_rejection:
             # Spam rejections: delete email but don't count as undeliverable
             spam_rejections_count += 1
-            lg().info(f"{recipient_email} - spam filter rejection, deleting email without counting")
+            lg.info(f"{recipient_email} - spam filter rejection, deleting email without counting")
         else:
             # Regular delivery failures: increase count
             current_count = undelivered_data.get(recipient_email, 0) + 1
@@ -68,14 +68,14 @@ def parse_undelivered_emails(undelivered_emails):
             # Check if counter reaches 2, mark for undeliverable status
             if current_count >= 2:
                 emails_to_mark_undeliverable.append(recipient_email)
-                lg().info(
+                lg.info(
                     f"{recipient_email} reached {current_count} undelivered emails, marking as undeliverable"
                 )
 
     # Save updated undelivered data
     save_undelivered_data(undelivered_data)
     regular_failures = len(undelivered_emails) - spam_rejections_count
-    lg().info(f"Updated undelivered counts for {regular_failures} emails ({spam_rejections_count} spam rejections ignored)")
+    lg.info(f"Updated undelivered counts for {regular_failures} emails ({spam_rejections_count} spam rejections ignored)")
     return emails_to_delete, emails_to_mark_undeliverable
 
 
@@ -84,7 +84,7 @@ def delete_emails(emails_to_delete):
     for email_id in emails_to_delete:
         if delete_email(email_id):
             deleted_count += 1
-    lg().info(f'Deleted {deleted_count}/{len(emails_to_delete)} undelivered emails')
+    lg.info(f'Deleted {deleted_count}/{len(emails_to_delete)} undelivered emails')
 
 
 def mark_undeliverable(emails_to_mark_undeliverable):
@@ -100,7 +100,7 @@ def handle_undelivered():
         delete_emails(emails_to_delete)
         mark_undeliverable(emails_to_mark_undeliverable)
     except Exception as e:
-        lg().error(f"Error processing undelivered emails: {e}")
+        lg.error(f"Error processing undelivered emails: {e}")
     finally:
         mail.close()
 

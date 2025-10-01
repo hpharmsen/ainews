@@ -33,7 +33,7 @@ class Mail:
             self.mail.login(self.email_user, self.email_pass)
             return True
         except Exception as e:
-            lg().info(f"Failed to connect to IMAP server: {str(e)}")
+            lg.info(f"Failed to connect to IMAP server: {str(e)}")
             return False
 
     def delete_email(self, email_uid):
@@ -43,12 +43,12 @@ class Mail:
             if result[0] == 'OK':
                 self.mail.uid('store', email_uid, '+FLAGS', '\\Deleted')
                 self.mail.expunge()
-                lg().info(f"✓ Deleted sent email with Message-ID: {email_uid}")
+                lg.info(f"✓ Deleted sent email with Message-ID: {email_uid}")
                 return True
-            lg().error(f"✗ Failed to delete sent email with Message-ID: {email_uid}.\nResult was {result}")
+            lg.error(f"✗ Failed to delete sent email with Message-ID: {email_uid}.\nResult was {result}")
             return False
         except Exception as e:
-            lg().error(f"✗ Failed to delete sent email with Message-ID: {email_uid}\nException was: {str(e)}")
+            lg.error(f"✗ Failed to delete sent email with Message-ID: {email_uid}\nException was: {str(e)}")
             return False
 
     def get_emails(self):
@@ -56,17 +56,17 @@ class Mail:
         try:
             status, _ = self.mail.select(FILTER_ON_LABEL, readonly=False)
             if status != 'OK':
-                lg().error(f"Failed to access label: {FILTER_ON_LABEL}")
+                lg.error(f"Failed to access label: {FILTER_ON_LABEL}")
                 return []
 
             status, email_uids = self.mail.uid('search', None, 'ALL')
             if status != 'OK' or not email_uids or not email_uids[0]:
-                lg().error(f"No emails found in label: {FILTER_ON_LABEL}")
+                lg.error(f"No emails found in label: {FILTER_ON_LABEL}")
                 return []
 
             return email_uids[0].split()
         except Exception as e:
-            lg().error(f"Error getting emails: {str(e)}")
+            lg.error(f"Error getting emails: {str(e)}")
             return []
 
     def get_email_details(self, email_uid):
@@ -186,7 +186,7 @@ class Mail:
             return body
             
         except Exception as e:
-            lg().error(f"Error getting email body: {str(e)}")
+            lg.error(f"Error getting email body: {str(e)}")
             return None
 
     def get_undelivered(self) -> list[dict[str, str]]:
@@ -199,13 +199,13 @@ class Mail:
         try:
             if not self.mail:
                 if not self.connect():
-                    lg().error('Failed to connect to IMAP server')
+                    lg.error('Failed to connect to IMAP server')
                     return []
 
             # Select inbox
             status, _ = self.mail.select('INBOX', readonly=True)
             if status != 'OK':
-                lg().error('Failed to access INBOX')
+                lg.error('Failed to access INBOX')
                 return []
 
             # Search for emails from Mail Delivery Subsystem or Mail Delivery System
@@ -235,7 +235,7 @@ class Mail:
             return undelivered_emails
 
         except Exception as e:
-            lg().error(f'Error getting undelivered emails: {str(e)}')
+            lg.error(f'Error getting undelivered emails: {str(e)}')
             return []
 
     def _extract_original_recipient(self, msg) -> dict | None:
@@ -336,17 +336,17 @@ def get_raw_mail_text(schedule: str, cached: bool=False, verbose: bool=False):
 
     if cached and cache_file.is_file():
         with open(cache_file, 'r', encoding='utf-8') as f:
-            lg().info("Using cached emails")
+            lg.info("Using cached emails")
             return f.read()
 
-    lg().info("Connecting to email ...")
+    lg.info("Connecting to email ...")
     mail = Mail()
     
     if not mail.connect():
-        lg().error("Failed to connect to the email server.")
+        lg.error("Failed to connect to the email server.")
         return
 
-    lg().info("Fetching emails ...")
+    lg.info("Fetching emails ...")
     email_ids = mail.get_emails()
     if not email_ids:
         return
@@ -377,7 +377,7 @@ def get_raw_mail_text(schedule: str, cached: bool=False, verbose: bool=False):
                 sender_name = decode_email_header(details['sender_name'])
                 subject = decode_email_header(details['subject'])
                 if verbose:
-                    lg().info(f"{sender_name} {details['sender_email']} - {details['date']} - {subject}")
+                    lg.info(f"{sender_name} {details['sender_email']} - {details['date']} - {subject}")
                 body = mail.get_email_body(email_id)
                 text += '==================================================\n' + \
                 f"Source: {sender_name} {details['sender_email']}\n" + \

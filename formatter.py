@@ -153,5 +153,5 @@ def create_html_email(schedule: str, items: list, title: str, image_url: str):
 
     with open(cache_file, "w", encoding="utf-8") as f:
         f.write(html_email)
-    lg().info(f"HTML e-mail opgeslagen als {cache_file.stem}.html")
+    lg.info(f"HTML e-mail opgeslagen als {cache_file.stem}.html")
     return html_email

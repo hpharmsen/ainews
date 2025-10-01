@@ -65,14 +65,14 @@ def update_subscription(email: str, status: str) -> bool:
                 query = update(subscriber_table).where(subscriber_table.c.email == email).values(status=status)
                 result = conn.execute(query)
                 if result.rowcount > 0:
-                    lg().info(f"Marked {email} as undeliverable")
+                    lg.info(f"Marked {email} as undeliverable")
                     return True
                 else:
-                    lg().error(f"Failed to update status for {email}")
+                    lg.error(f"Failed to update status for {email}")
                     return False
 
     except Exception as e:
-        lg().error(f'Error in update_subscription\n{str(e)}')
+        lg.error(f'Error in update_subscription\n{str(e)}')
         return False
 
 
