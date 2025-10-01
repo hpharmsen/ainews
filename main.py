@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 
 from dotenv import load_dotenv
 
@@ -11,6 +12,7 @@ from ai import generate_ai_summary, generate_ai_image
 from formatter import create_html_email
 from log import setup_logging, lg
 from mailer import send_newsletter
+from undelivered import handle_undelivered
 
 VERBOSE = True
 MONTHS = ["januari", "februari", "maart", "april", "mei", "juni", "juli", "augustus", "september", "oktober", "november", "december"]
@@ -70,3 +72,5 @@ if __name__ == '__main__':
     html_mail = create_html_email(schedule, articles, title, image_url)
     add_to_database(schedule, title, html_mail, image_url)
     send_newsletter(schedule, html_mail, title)
+    time.sleep(60)
+    handle_undelivered()

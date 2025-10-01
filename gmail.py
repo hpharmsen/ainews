@@ -43,9 +43,12 @@ class Mail:
             if result[0] == 'OK':
                 self.mail.uid('store', email_uid, '+FLAGS', '\\Deleted')
                 self.mail.expunge()
+                lg().info(f"✓ Deleted sent email with Message-ID: {email_uid}")
                 return True
+            lg().error(f"✗ Failed to delete sent email with Message-ID: {email_uid}.\nResult was {result}")
             return False
-        except Exception:
+        except Exception as e:
+            lg().error(f"✗ Failed to delete sent email with Message-ID: {email_uid}\nException was: {str(e)}")
             return False
 
     def get_emails(self):

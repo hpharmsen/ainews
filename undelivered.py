@@ -5,6 +5,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from gmail import Mail
+from log import lg
+from mailer import delete_email
 from subscribers import update_subscription
 
 undelivered_file = Path(__file__).parent / "data" / "undelivered.json"
@@ -21,24 +23,22 @@ def save_undelivered_data(data: dict[str, int]) -> None:
     with open(undelivered_file, 'w') as f:
         json.dump(data, f, indent=2)
 
+
 def get_mail():
     mail = Mail()
     if not mail.connect():
-        print('Failed to connect to email server')
-        exit(1)
-    if not mail.connect():
-        print("Failed to connect to email server")
+        lg().error('Failed to connect to email server')
         exit(1)
     return mail
 
 
 def get_undelivered_emails(mail: Mail) -> list[dict[str, str]]:
-    print("Retrieving undelivered emails...")
+    lg().info("Retrieving undelivered emails...")
     undelivered_emails = mail.get_undelivered()
     if not undelivered_emails:
-        print("No undelivered emails found")
+        lg().info("No undelivered emails found")
         exit(0)
-    print(f"Found {len(undelivered_emails)} undelivered emails")
+    lg().info(f"Found {len(undelivered_emails)} undelivered emails")
     return undelivered_emails
 
 
@@ -59,7 +59,7 @@ def parse_undelivered_emails(undelivered_emails):
         if is_spam_rejection:
             # Spam rejections: delete email but don't count as undeliverable
             spam_rejections_count += 1
-            print(f"{recipient_email} - spam filter rejection, deleting email without counting")
+            lg().info(f"{recipient_email} - spam filter rejection, deleting email without counting")
         else:
             # Regular delivery failures: increase count
             current_count = undelivered_data.get(recipient_email, 0) + 1
@@ -68,38 +68,31 @@ def parse_undelivered_emails(undelivered_emails):
             # Check if counter reaches 2, mark for undeliverable status
             if current_count >= 2:
                 emails_to_mark_undeliverable.append(recipient_email)
-                print(
+                lg().info(
                     f"{recipient_email} reached {current_count} undelivered emails, marking as undeliverable"
                 )
 
     # Save updated undelivered data
     save_undelivered_data(undelivered_data)
     regular_failures = len(undelivered_emails) - spam_rejections_count
-    print(f"Updated undelivered counts for {regular_failures} emails ({spam_rejections_count} spam rejections ignored)")
+    lg().info(f"Updated undelivered counts for {regular_failures} emails ({spam_rejections_count} spam rejections ignored)")
     return emails_to_delete, emails_to_mark_undeliverable
 
 
 def delete_emails(emails_to_delete):
     deleted_count = 0
     for email_id in emails_to_delete:
-        if mail.delete_email(email_id):
+        if delete_email(email_id):
             deleted_count += 1
-        else:
-            print(f'Failed to delete email ID: {email_id}')
-    print(f'Deleted {deleted_count}/{len(emails_to_delete)} undelivered emails')
+    lg().info(f'Deleted {deleted_count}/{len(emails_to_delete)} undelivered emails')
 
 
 def mark_undeliverable(emails_to_mark_undeliverable):
     for email_address in emails_to_mark_undeliverable:
-        if update_subscription(email_address, "undeliverable"):
-            print(f"Marked {email_address} as undeliverable")
-        else:
-            print(f"Failed to update status for {email_address}")
+        update_subscription(email_address, "undeliverable")
 
 
-if __name__ == '__main__':
-    load_dotenv()
-
+def handle_undelivered():
     mail = get_mail()
     try:
         undelivered_emails = get_undelivered_emails(mail)
@@ -107,7 +100,11 @@ if __name__ == '__main__':
         delete_emails(emails_to_delete)
         mark_undeliverable(emails_to_mark_undeliverable)
     except Exception as e:
-        print(f"Error processing undelivered emails: {e}")
-        exit(1)
+        lg().error(f"Error processing undelivered emails: {e}")
     finally:
         mail.close()
+
+
+if __name__ == '__main__':
+    load_dotenv()
+    handle_undelivered()

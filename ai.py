@@ -175,7 +175,7 @@ def generate_ai_summary(schedule: str, text: str, verbose=False, cached=True):
                  .replace('[LATEST_NEWSLETTERS]', latest_newsletters)\
                  .replace('[NEWS_EMAILS]', text)
     tokens = model.token_count(prompt)
-    lg().info('\nGenerating summary...')
+    lg().info('Generating summary...')
     for _ in range(3):
         try:
             summary = model.prompt(prompt, return_json=True, cached=True)
@@ -186,7 +186,7 @@ def generate_ai_summary(schedule: str, text: str, verbose=False, cached=True):
         summary = model.prompt(prompt, return_json=True, cached=True)
 
     # Check the urls by opening them and see if they return a proper web page
-    lg().info('\nChecking links ...')
+    lg().info('Checking links ...')
     for item in summary:
         for link in list(item['links']):
             resolved = check_and_resolve_url(link)

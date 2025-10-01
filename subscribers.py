@@ -4,6 +4,8 @@ from contextlib import contextmanager
 from sqlalchemy import create_engine, MetaData, select, update
 from dotenv import load_dotenv
 
+from log import lg
+
 
 @contextmanager
 def db():
@@ -62,9 +64,15 @@ def update_subscription(email: str, status: str) -> bool:
             with conn.begin():
                 query = update(subscriber_table).where(subscriber_table.c.email == email).values(status=status)
                 result = conn.execute(query)
-                return result.rowcount > 0
+                if result.rowcount > 0:
+                    lg().info(f"Marked {email} as undeliverable")
+                    return True
+                else:
+                    lg().error(f"Failed to update status for {email}")
+                    return False
 
-    except Exception:
+    except Exception as e:
+        lg().error(f'Error in update_subscription\n{str(e)}')
         return False
 
 

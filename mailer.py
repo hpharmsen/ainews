@@ -88,23 +88,15 @@ def create_message(recipient: str, subject: str, html_content: str, reply_to: st
     return msg
 
 
-def delete_sent_email(message_id: str) -> bool:
+def delete_email(message_id: str) -> bool:
     """ Returns bool: True if deletion was successful, False otherwise """
     try:
         mail = Mail()
-        # Remove angle brackets if present
-        message_id = message_id.strip('<>')
-
-        if mail.delete_email(message_id):
-            lg().info(f"✓ Deleted sent email with Message-ID: {message_id}")
-            return True
-        else:
-            lg().error(f"✗ Failed to delete sent email with Message-ID: {message_id}")
-            return False
-
     except Exception as e:
-        lg().error(f"✗ Error while trying to delete sent email with Message-ID: {message_id} - {str(e)}")
+        lg().error(f"✗ Error connecting to IMAP server while trying to an email\n{str(e)}")
         return False
+    message_id = message_id.strip('<>') # Remove angle brackets if present
+    return mail.delete_email(message_id)
 
 
 def update_last_sent_timestamp(schedule: str) -> None:
@@ -145,19 +137,17 @@ def get_mailerlog(day:Day) -> set:
 
 def send_newsletter(schedule: str, newsletter_html: str, title: str):
     subscribers = get_subscribers(schedule)
+    already_mailed = get_mailerlog(Day())
+    subscribers = [s for s in subscribers if s not in already_mailed]
 
     # Rate limiting: Send max 100 emails per batch with 1-second delay
     BATCH_SIZE = 100
-
-    already_mailed = get_mailerlog(Day())
 
     # Collect Message-IDs for deletion after sending
     message_ids_to_delete = []
 
     with logged_in_smtp() as server:
         for i, recipient in enumerate(subscribers, 1):
-            if recipient in already_mailed:
-                continue
             try:
                 # Personalize the HTML content
                 html = newsletter_html.replace("[EMAIL]", recipient)
@@ -201,7 +191,7 @@ def send_newsletter(schedule: str, newsletter_html: str, title: str):
 
         deleted_count = 0
         for message_id in message_ids_to_delete:
-            if delete_sent_email(message_id):
+            if delete_email(message_id):
                 deleted_count += 1
             time.sleep(1)  # Small delay between deletions
 
