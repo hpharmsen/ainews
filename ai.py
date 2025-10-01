@@ -249,8 +249,8 @@ def generate_ai_image(articles: list[dict], schedule: str, cached: bool, max_ret
                     options = {"aspect_ratio": "16:9"}
                     img = shadow_model.generate_image(prompt, STYLE_IMAGES, options=options, size=(600, 300))
                     img.save(shadow_out_path, format="PNG")
-                except:
-                    lg().error("Failed to generate shadow image")
+                except Exception as e:
+                    lg().error("Failed to generate shadow image\n{str(e)}")
 
                 img = model.generate_image(prompt, STYLE_IMAGES, size=(600, 300))
                 img.save(out_path, format="PNG")

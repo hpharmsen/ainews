@@ -3,10 +3,11 @@
 .env
 /data/last_sent.json
 /data/mailerlog.txt
+/data/app.log
+/data/undelivered.json
 /summary.jsonl
 /summary.md
 .DS_Store
 .envrc
 .idea/
 __pycache__/
-/data/app.log
