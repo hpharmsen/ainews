@@ -197,6 +197,6 @@ def send_newsletter(schedule: str, newsletter_html: str, title: str):
 
         lg.info(f"Successfully deleted {deleted_count}/{len(message_ids_to_delete)} sent emails")
 
-    lg.info(f"Newsletter sending completed. Sent to {len(subscribers)} recipients.")
+    lg.info(f"Newsletter sending completed. Sent to {len(subscribers)} recipients.\n")
     mailerlog()
     update_last_sent_timestamp(schedule)

@@ -90,6 +90,7 @@ def delete_emails(emails_to_delete):
 def mark_undeliverable(emails_to_mark_undeliverable):
     for email_address in emails_to_mark_undeliverable:
         update_subscription(email_address, "undeliverable")
+    lg.info(f"{len(emails_to_mark_undeliverable)} emails marked as undeliverable\n")
 
 
 def handle_undelivered():
@@ -100,7 +101,7 @@ def handle_undelivered():
         delete_emails(emails_to_delete)
         mark_undeliverable(emails_to_mark_undeliverable)
     except Exception as e:
-        lg.error(f"Error processing undelivered emails: {e}")
+        lg.error(f"Error processing undelivered emails - {e}\n")
     finally:
         mail.close()
 

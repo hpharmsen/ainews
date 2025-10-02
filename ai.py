@@ -206,14 +206,6 @@ def generate_ai_summary(schedule: str, text: str, verbose=False, cached=True):
         for item in summary:
             f.write(json.dumps(item, ensure_ascii=False) + "\n")
 
-    if verbose:
-        for line in summary:
-            lg.info(line['title'])
-            lg.info(line['summary'])
-            for link in line['links']:
-                lg.info(link)
-            lg.info('')
-
     return summary
 
 
@@ -250,7 +242,7 @@ def generate_ai_image(articles: list[dict], schedule: str, cached: bool, max_ret
                     img = shadow_model.generate_image(prompt, STYLE_IMAGES, options=options, size=(600, 300))
                     img.save(shadow_out_path, format="PNG")
                 except Exception as e:
-                    lg.error("Failed to generate shadow image\n{str(e)}")
+                    lg.error(f"Failed to generate shadow image - {str(e)}")
 
                 img = model.generate_image(prompt, STYLE_IMAGES, size=(600, 300))
                 img.save(out_path, format="PNG")

@@ -33,7 +33,7 @@ class Mail:
             self.mail.login(self.email_user, self.email_pass)
             return True
         except Exception as e:
-            lg.info(f"Failed to connect to IMAP server: {str(e)}")
+            lg.error(f"Failed to connect to IMAP server: {str(e)}")
             return False
 
     def delete_email(self, email_uid):
@@ -376,8 +376,6 @@ def get_raw_mail_text(schedule: str, cached: bool=False, verbose: bool=False):
             if email_date >= from_date:
                 sender_name = decode_email_header(details['sender_name'])
                 subject = decode_email_header(details['subject'])
-                if verbose:
-                    lg.info(f"{sender_name} {details['sender_email']} - {details['date']} - {subject}")
                 body = mail.get_email_body(email_id)
                 text += '==================================================\n' + \
                 f"Source: {sender_name} {details['sender_email']}\n" + \
