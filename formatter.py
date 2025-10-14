@@ -74,7 +74,8 @@ def build_html_email(schedule: str, items: list[dict], newsletter_title: str, in
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f5f7fb;">
         <tr>
             <td align="center" style="padding:24px 12px;">
-                <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:12px;border:1px solid #e6ecf3;">
+                <table role="presentation" width="600" cellpadding="0" cellspacing="0" 
+                 style="max-width:600px;width:100%;background:#ffffff;border-radius:12px;border:1px solid #e6ecf3;">
                     <!-- Header -->
                     <tr>
                         <td style="padding:20px 12px 8px 24px;">
@@ -89,7 +90,8 @@ def build_html_email(schedule: str, items: list[dict], newsletter_title: str, in
                                         </p>
                                     </td>
                                     <td style="text-align: right; vertical-align: top; padding-right: 0px;">
-                                        <img src="https://s3.eu-west-1.amazonaws.com/harmsen.nl/nieuwsbrief/logo_120.png" alt="Harmsen AI Consultancy" style="width:90px; height:90px">
+                                        <img src="https://s3.eu-west-1.amazonaws.com/harmsen.nl/nieuwsbrief/logo_120.png" 
+                                         alt="Harmsen AI Consultancy" style="width:65px; height:65px">
                                     </td>
                                 </tr>
                             </table>

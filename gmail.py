@@ -36,19 +36,44 @@ class Mail:
             lg.error(f"Failed to connect to IMAP server: {str(e)}")
             return False
 
-    def delete_email(self, email_uid):
-        """Move an email to trash."""
+    def delete_email(self, identifier, folder='[Gmail]/Sent Mail'):
+        """
+        Move an email to trash.
+
+        Args:
+            identifier: Either a UID (numeric string) or Message-ID
+            folder: Mailbox to search in (default: Sent Mail)
+        """
         try:
+            # Select the folder
+            status, _ = self.mail.select(f'"{folder}"' if '/' in folder else folder, readonly=False)
+            if status != 'OK':
+                lg.error(f"✗ Failed to select {folder} folder")
+                return False
+
+            # Determine if identifier is a UID or Message-ID
+            if identifier.isdigit():
+                # It's a UID, use it directly
+                email_uid = identifier.encode('utf-8')
+            else:
+                # It's a Message-ID, search for it
+                status, email_uids = self.mail.uid('search', None, f'(HEADER Message-ID "{identifier}")')
+                if status != 'OK' or not email_uids or not email_uids[0]:
+                    lg.error(f"✗ Email with Message-ID {identifier} not found in {folder}")
+                    return False
+                email_uid = email_uids[0].split()[0]
+
+            # Move to trash
             result = self.mail.uid('copy', email_uid, '[Gmail]/Trash')
             if result[0] == 'OK':
                 self.mail.uid('store', email_uid, '+FLAGS', '\\Deleted')
                 self.mail.expunge()
-                lg.info(f"✓ Deleted sent email with Message-ID: {email_uid}")
+                lg.info(f"✓ Deleted email {identifier} from {folder}")
                 return True
-            lg.error(f"✗ Failed to delete sent email with Message-ID: {email_uid}.\nResult was {result}")
+            lg.error(f"✗ Failed to delete email {identifier} from {folder}.\nResult was {result}")
             return False
         except Exception as e:
-            lg.error(f"✗ Failed to delete sent email with Message-ID: {email_uid}\nException was: {str(e)}")
+            lg.error(f"✗ Failed to delete email {identifier} from {folder}\nException was: {str(e)}")
             return False
 
     def get_emails(self):

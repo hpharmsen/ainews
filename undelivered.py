@@ -82,7 +82,7 @@ def parse_undelivered_emails(undelivered_emails):
 def delete_emails(emails_to_delete):
     deleted_count = 0
     for email_id in emails_to_delete:
-        if delete_email(email_id):
+        if delete_email(email_id, folder='INBOX'):
             deleted_count += 1
     lg.info(f'Deleted {deleted_count}/{len(emails_to_delete)} undelivered emails')
 

@@ -1,4 +1,5 @@
 import os
+import traceback
 from typing import List
 from contextlib import contextmanager
 from sqlalchemy import create_engine, MetaData, select, update
@@ -72,7 +73,7 @@ def update_subscription(email: str, status: str) -> bool:
                     return False
 
     except Exception as e:
-        lg.error(f'Error in update_subscription\n{str(e)}')
+        lg.error(f'Error in update_subscription\n{traceback.format_exc()}')
         return False
 
 

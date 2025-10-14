@@ -216,8 +216,6 @@ def generate_ai_image(articles: list[dict], schedule: str, cached: bool, max_ret
     Slaat de 1e gegenereerde afbeelding op als PNG en retourneert het pad (of upload jouw S3).
     """
     out_path = Path(cache_file_prefix(schedule) + '.png')
-    shadow_img_name = Path(cache_file_prefix(schedule) + '_shadow.png')
-    shadow_out_path = os.path.join("cache", shadow_img_name)
 
     if cached and os.path.isfile(out_path):
         lg.info('Loading image from cache')
@@ -230,19 +228,11 @@ def generate_ai_image(articles: list[dict], schedule: str, cached: bool, max_ret
 
         lg.info('Generating image...')
         model = Model(DESIGN_MODEL)
-        shadow_model = Model('reve')
         # Retry logic with exponential backoff
         for attempt in range(max_retries):
             try:
                 if attempt > 0:
                     lg.warning(f'Generating image (attempt {attempt + 1}/{max_retries})...')
-
-                try:
-                    options = {"aspect_ratio": "16:9"}
-                    img = shadow_model.generate_image(prompt, STYLE_IMAGES, options=options, size=(600, 300))
-                    img.save(shadow_out_path, format="PNG")
-                except Exception as e:
-                    lg.error(f"Failed to generate shadow image - {str(e)}")
 
                 img = model.generate_image(prompt, STYLE_IMAGES, size=(600, 300))
                 img.save(out_path, format="PNG")

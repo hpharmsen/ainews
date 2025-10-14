@@ -88,15 +88,27 @@ def create_message(recipient: str, subject: str, html_content: str, reply_to: st
     return msg
 
 
-def delete_email(message_id: str) -> bool:
-    """ Returns bool: True if deletion was successful, False otherwise """
+def delete_email(message_id: str, folder: str = '[Gmail]/Sent Mail') -> bool:
+    """
+    Delete an email from a specified folder.
+
+    Args:
+        message_id: Email identifier (UID or Message-ID)
+        folder: Mailbox to delete from (default: Sent Mail)
+
+    Returns:
+        bool: True if deletion was successful, False otherwise
+    """
     try:
         mail = Mail()
+        if not mail.connect():
+            lg.error('✗ Failed to connect to IMAP server')
+            return False
     except Exception as e:
-        lg.error(f"✗ Error connecting to IMAP server while trying to an email\n{str(e)}")
+        lg.error(f"✗ Error connecting to IMAP server while trying to delete an email\n{str(e)}")
         return False
     message_id = message_id.strip('<>') # Remove angle brackets if present
-    return mail.delete_email(message_id)
+    return mail.delete_email(message_id, folder)
 
 
 def update_last_sent_timestamp(schedule: str) -> None:
