@@ -10,13 +10,6 @@ from log import lg
 def build_html_email(schedule: str, items: list[dict], newsletter_title: str, intro_text: str, image_url: str) -> str:
 
     schedule_naam = 'dagelijkse' if schedule == 'daily' else 'weekelijkse'
-    footer_text = f"""<b>Colofon</b><br>
-    Nieuwsselectie: {COPY_WRITE_MODEL_NAME}<br>
-    Teksten: {COPY_WRITE_MODEL_NAME}<br>
-    Art direction: {ART_DIRECTION_MODEL_NAME}<br>
-    Graphic design: {DESIGN_MODEL_NAME}<br>
-    Aansturen van alle AI: HP<br><br> 
-    Je ontvangt deze mail omdat je bent aangemeld voor de <b>{schedule_naam}</b> nieuwsbrief."""
     switch_url = 'https://harmsen.nl/nieuwsbrief/'
     if schedule == 'daily':
         switch_url += 'wekelijks'
@@ -125,11 +118,18 @@ def build_html_email(schedule: str, items: list[dict], newsletter_title: str, in
                     <tr>
                         <td style="padding:14px 24px 20px 24px;border-top:1px solid #e6ecf3;background:#fbfcfe;border-radius:0 0 12px 12px;">
                             <p style="margin:0;font-family:Inter,Segoe UI,Arial,sans-serif;font-size:12px;color:#6b7280;">
-                                {footer_text}
+                                <b>Colofon</b><br>
+                                Nieuwsselectie: {COPY_WRITE_MODEL_NAME}<br>
+                                Teksten: {COPY_WRITE_MODEL_NAME}<br>
+                                Art direction: {ART_DIRECTION_MODEL_NAME}<br>
+                                Graphic design: {DESIGN_MODEL_NAME}<br>
+                                Aansturen van alle AI: HP<br><br> 
+                                Je ontvangt deze mail omdat je bent aangemeld voor de <b>{schedule_naam}</b> nieuwsbrief.
                             </p>
                             <p style="margin:8px 0 0 0;font-family:Inter,Segoe UI,Arial,sans-serif;font-size:12px;color:#9ca3af;">
                                 <a href="https://harmsen.nl/nieuwsbrief/afmelden/?email=[EMAIL]" style="color:#6b7280;text-decoration:underline;">Afmelden</a> ·
-                                <a href="{switch_url}?email=[EMAIL]" style="color:#6b7280;text-decoration:underline;">Wissel naar de {switch_text} nieuwsbrief</a>
+                                <a href="{switch_url}?email=[EMAIL]" style="color:#6b7280;text-decoration:underline;">Wissel naar de {switch_text} nieuwsbrief</a> ·
+                                <a href="https://www.harmsen.nl/nieuwsbrief/">harmsen.nl/nieuwsbrief</a>
                             </p>
                         </td>
                     </tr>
