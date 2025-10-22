@@ -129,7 +129,7 @@ def build_html_email(schedule: str, items: list[dict], newsletter_title: str, in
                             <p style="margin:8px 0 0 0;font-family:Inter,Segoe UI,Arial,sans-serif;font-size:12px;color:#9ca3af;">
                                 <a href="https://harmsen.nl/nieuwsbrief/afmelden/?email=[EMAIL]" style="color:#6b7280;text-decoration:underline;">Afmelden</a> ·
                                 <a href="{switch_url}?email=[EMAIL]" style="color:#6b7280;text-decoration:underline;">Wissel naar de {switch_text} nieuwsbrief</a> ·
-                                <a href="https://www.harmsen.nl/nieuwsbrief/">harmsen.nl/nieuwsbrief</a>
+                                <a href="https://www.harmsen.nl/nieuwsbrief/" style="color:#6b7280;text-decoration:underline;">harmsen.nl/nieuwsbrief</a>
                             </p>
                         </td>
                     </tr>
