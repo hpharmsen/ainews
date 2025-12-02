@@ -8,7 +8,7 @@ from database import add_to_database
 from gmail import get_raw_mail_text
 from justdays import Day
 
-from ai import generate_ai_summary, generate_ai_image
+from ai import generate_ai_summary, generate_ai_image, generate_infographic
 from formatter import create_html_email
 from log import lg
 from mailer import send_newsletter
@@ -57,20 +57,30 @@ def create_title(schedule: str) -> str:
     return title
 
 
-if __name__ == '__main__':
-    os.chdir(os.path.dirname(os.path.abspath(__file__)))
-    load_dotenv(override=True)
-    lg.setup_logging('data/app.log')
-
+def main():
     lg.info("============ Starting application ============")
-    schedule, use_cached = parse_command_line()
-    text = get_raw_mail_text(schedule, cached=use_cached, verbose=VERBOSE)
-    articles = generate_ai_summary(schedule, text, cached=use_cached, verbose=VERBOSE)
-    article_index, image_url = generate_ai_image(articles, schedule, cached=use_cached)
+    schedule, cached = parse_command_line()
+    text = get_raw_mail_text(schedule, cached=cached, verbose=VERBOSE)
+    articles = generate_ai_summary(schedule, text, cached=cached, verbose=VERBOSE)
+
+    # Image
+    article_index, image_url = generate_ai_image(articles, schedule, cached=cached)
     articles = [articles[article_index]] + articles[:article_index] + articles[article_index + 1 :]
+
+    # Infographic
+    infographic_article_index, infographic_url = generate_infographic(articles, schedule, cached=cached)
+
     title = create_title(schedule)
-    html_mail = create_html_email(schedule, articles, title, image_url)
+    html_mail = create_html_email(schedule, articles, title, image_url, infographic_url, infographic_article_index)
     add_to_database(schedule, title, html_mail, image_url)
     send_newsletter(schedule, html_mail, title)
     time.sleep(60)
     handle_undelivered()
+
+
+if __name__ == '__main__':
+    os.chdir(os.path.dirname(os.path.abspath(__file__)))
+    load_dotenv(override=True)
+    lg.setup_logging('data/app.log')
+    main()
+

@@ -2,12 +2,17 @@ import html
 from datetime import date
 from pathlib import Path
 
-from ai import COPY_WRITE_MODEL_NAME, DESIGN_MODEL_NAME, ART_DIRECTION_MODEL_NAME
+from ai import (
+    COPY_WRITE_MODEL_NAME,
+    DESIGN_MODEL_NAME,
+    ART_DIRECTION_MODEL_NAME,
+    INFOGRAPHIC_MODEL_NAME,
+)
 from database import cache_file_prefix
 from log import lg
 
 
-def build_html_email(schedule: str, items: list[dict], newsletter_title: str, intro_text: str, image_url: str) -> str:
+def build_html_email(schedule: str, items: list[dict], newsletter_title: str, intro_text: str, image_url: str, infographic_url: str | None = None, infographic_article_index: int | None = None) -> str:
 
     schedule_naam = 'dagelijkse' if schedule == 'daily' else 'weekelijkse'
     switch_url = 'https://harmsen.nl/nieuwsbrief/'
@@ -21,12 +26,20 @@ def build_html_email(schedule: str, items: list[dict], newsletter_title: str, in
     today = date.today().strftime("%d %b %Y")
     # Kaarten opbouwen
     cards_html = []
-    for item in items:
+    for idx, item in enumerate(items):
         title = item.get("title", "")
         summary = item.get("summary", "")
         summary = '<p>' + summary.replace('\n\n', '</p><p>').replace('\n', '<br>') + '</p>'
-        links = item.get("links") or []
+
+        # Voeg infographic toe na het gespecificeerde artikel
+        infographic_html = ''
+        if infographic_url and infographic_article_index is not None and idx == infographic_article_index:
+            infographic_html = f"""
+            <!-- Infographic -->
+            <img src="{infographic_url}" alt="Infographic" style="width:100%; height:auto; display:block; border-radius:8px;" />
+            """
         # Linklijst
+        links = item.get("links") or []
         links_html = ""
         if links:
             link_tags = []
@@ -45,13 +58,13 @@ def build_html_email(schedule: str, items: list[dict], newsletter_title: str, in
                 <td style="padding:16px 20px;border:1px solid #e6e6e6;border-radius:8px;background:#ffffff;">
                     <h3 style="margin:0 0 8px 0;font-family:Inter,Segoe UI,Arial,sans-serif;font-size:18px;line-height:1.3;color:#111111;">{title}</h3>
                     <p style="margin:0 0 10px 0;font-family:Inter,Segoe UI,Arial,sans-serif;font-size:14px;line-height:1.6;color:#333333;">{summary}</p>
+                    {infographic_html}
                     <p style="margin:0;font-family:Inter,Segoe UI,Arial,sans-serif;font-size:14px;">
                         {links_html}
                     </p>
                 </td>
             </tr>
-            <tr><td style="height:14px;line-height:14px;font-size:0;">&nbsp;</td></tr>
-        """)
+            <tr><td style="height:14px;line-height:14px;font-size:0;">&nbsp;</td></tr>""")
 
     cards = "\n".join(cards_html)
 
@@ -122,7 +135,8 @@ def build_html_email(schedule: str, items: list[dict], newsletter_title: str, in
                                 Nieuwsselectie: {COPY_WRITE_MODEL_NAME}<br>
                                 Teksten: {COPY_WRITE_MODEL_NAME}<br>
                                 Art direction: {ART_DIRECTION_MODEL_NAME}<br>
-                                Graphic design: {DESIGN_MODEL_NAME}<br>
+                                Header graphic design: {DESIGN_MODEL_NAME}<br>
+                                Infographic: {INFOGRAPHIC_MODEL_NAME}<br>
                                 Aansturen van alle AI: HP<br><br> 
                                 Je ontvangt deze mail omdat je bent aangemeld voor de <b>{schedule_naam}</b> nieuwsbrief.
                             </p>
@@ -143,12 +157,14 @@ def build_html_email(schedule: str, items: list[dict], newsletter_title: str, in
     return html_doc
 
 
-def create_html_email(schedule: str, items: list, title: str, image_url: str):
+def create_html_email(schedule: str, items: list, title: str, image_url: str, infographic_url: str | None = None, infographic_article_index: int | None = None):
     html_email = build_html_email(schedule,
         items,
         newsletter_title=title,
         intro_text="Actueel, concreet en to-the-point",
-        image_url=image_url
+        image_url=image_url,
+        infographic_url=infographic_url,
+        infographic_article_index=infographic_article_index
     )
     # Schrijf naar bestand voor test/preview
     cache_file = Path(cache_file_prefix(schedule) + ".html")

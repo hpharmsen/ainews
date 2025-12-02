@@ -19,6 +19,8 @@ ART_DIRECTION_MODEL = "gpt-5"
 ART_DIRECTION_MODEL_NAME = "GPT-5"
 DESIGN_MODEL = "gemini-2.5-flash-image-preview"
 DESIGN_MODEL_NAME = "Nano Banana"
+INFOGRAPHIC_MODEL = 'gemini-3-pro-image-preview'
+INFOGRAPHIC_MODEL_NAME = 'Nano Banana pro (Gemini 3 Pro Image)'
 IMAGE_STYLE = 'Mirabel'
 
 COLORS = ['rood', 'groen', 'grijs', 'bruin', 'oranje', 'paars', 'blauw']
@@ -168,7 +170,7 @@ def generate_ai_summary(schedule: str, text: str, verbose=False, cached=True):
 
     # Generate new summary
     model = Model(COPY_WRITE_MODEL)
-    max_articles = 7 if schedule == 'daily' else 12
+    max_articles = 6 if schedule == 'daily' else 8
     latest_newsletters = get_last_newsletter_texts(schedule, limit=5)
     prompt = COPYWRITE_PROMPT\
                  .replace('[MAX_ARTICLES]', str(max_articles))\
@@ -267,6 +269,68 @@ def generate_ai_image(articles: list[dict], schedule: str, cached: bool, max_ret
     raise TimeoutError('Failed to upload image to S3 after 3 attempts')
 
 
+def generate_infographic(articles: list[dict], schedule: str, cached: bool, max_retries: int = 3) -> Tuple[int, str]:
+    out_path = Path(cache_file_prefix(schedule) + "_infographic.png")
+
+    if cached and os.path.isfile(out_path):
+        lg.info("Loading image from cache")
+        article_index = 0
+    else:
+        lg.info("Selecting article for infographic...")
+        article_index, _description = select_article_for_infographic(articles)
+        prompt = f"""Ik heb een nieuwsbrief over AI. Nu wil ik een AI model een infographic laten genereren die goed past bij de inhoud van een van de artikelen. 
+            Ik wil geen generiek AI beeld met robots en futuristische lijnen maar een serieuze infographic die echt past bij de inhoud van dit artikel.
+            <artikel>
+            {articles[article_index]}
+            </artikel>
+            Genereer deze infographic. 
+        
+            Richtlijnen voor de generatie van de infographic:
+            - BELANGRIJK: Gebruik niet te veel tekst of te kleine letters. De afbeelding wordt namelijk nog verkleind.
+            - Als je tekst gebruikt dan moet deze in het Nederlands zijn """
+
+        lg.info("Generating infographic...")
+        model = Model(INFOGRAPHIC_MODEL)
+        # Retry logic with exponential backoff
+        for attempt in range(max_retries):
+            try:
+                if attempt > 0:
+                    lg.warning(f"Generating infographic (attempt {attempt + 1}/{max_retries})...")
+
+                img = model.generate_image(prompt)
+                img.save(out_path, format="PNG")
+                lg.info("Image generated successfully")
+                break
+
+            except (httpx.ReadTimeout, TimeoutError) as e:
+                if attempt == max_retries - 1:  # Last attempt
+                    lg.error(f"Failed to generate infographic after {max_retries} attempts")
+                    raise Exception(
+                        f"Infographic generation timed out after {max_retries} attempts"
+                    ) from e
+
+                lg.warning(f"Timeout occurred, retrying...")
+                time.sleep(1)
+
+            except Exception as e:
+                if attempt == max_retries - 1:  # Last attempt
+                    lg.error(f"Failed to generate infographic: {str(e)}")
+                    raise
+                lg.error(f"Error generating infographic: {str(e)}. Retrying...")
+                time.sleep(5)  # Shorter delay for non-timeout errors
+
+    # Upload to S3
+    s3 = S3("harmsen.nl")
+    for attempt in range(3):
+        try:
+            url = s3.add(out_path, "nieuwsbrief/" + out_path.name)
+            return article_index, url
+        except Exception as e:
+            lg.error(f"Error uploading to S3, retrying... (attempt {attempt + 1}/3)")
+            time.sleep(5 * (attempt + 1))  # Exponential backoff for S3 upload
+    raise TimeoutError("Failed to upload infographic to S3 after 3 attempts")
+
+
 def select_article_for_image(articles: list[dict]) -> tuple[int, str]:
 
     prompt = f"""Ik heb een nieuwsbrief over AI met de volgende {len(articles)} artikelen:
@@ -289,6 +353,29 @@ def select_article_for_image(articles: list[dict]) -> tuple[int, str]:
 
     res = retry_prompt(model, prompt)
     return res['article'], res['description']
+
+
+def select_article_for_infographic(articles: list[dict]) -> tuple[int, str]:
+    prompt = f"""Ik heb een nieuwsbrief over AI met de volgende {len(articles)} artikelen:
+    <nieuwsbrief>
+    {articles}
+    </nieuwsbrief>
+
+    Nu wil ik een AI model een infographic laten genereren die goed past bij de inhoud. 
+    Ik wil geen generiek AI beeld met robots en futuristische lijnen maar een serieuze infographic
+    die echt past bij de inhoud van één van de artikelen.
+
+    Doe de volgende stappen:
+    1. Denk na over welk van de {len(articles)} artikelen zich hier het beste voor leent en waarom?
+    2. Denk na over wat er dan in die infographic zou moeten komen te staan.
+    3. Geef je antwoord in JSON met 2 velden: 
+    - article: index van het artikel dat je hebt geselecteerd (0 tot {len(articles) - 1})
+    - description: een beschrijving van de infographic"""
+
+    model = Model(ART_DIRECTION_MODEL)
+
+    res = retry_prompt(model, prompt)
+    return res["article"], res["description"]
 
 
 def create_image_prompt(article, description, schedule):
