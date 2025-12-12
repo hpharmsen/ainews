@@ -389,6 +389,7 @@ def get_raw_mail_text(schedule: str, cached: bool=False, verbose: bool=False):
         from_date = datetime.now(timezone.utc) - timedelta(weeks=1) if schedule == 'weekly' else datetime.now(timezone.utc) - timedelta(days=1)
 
     text = ""
+    max_len_per_mail = 2000
     for email_id in email_ids:
         details = mail.get_email_details(email_id)
         if not details:
@@ -401,12 +402,15 @@ def get_raw_mail_text(schedule: str, cached: bool=False, verbose: bool=False):
             if email_date >= from_date:
                 sender_name = decode_email_header(details['sender_name'])
                 subject = decode_email_header(details['subject'])
-                body = mail.get_email_body(email_id)
-                text += '==================================================\n' + \
+                body = str(mail.get_email_body(email_id))[:max_len_per_mail]
+                email_text = ' ==================================================\n' + \
                 f"Source: {sender_name} {details['sender_email']}\n" + \
                 f"Date: {details['date']}\n" + \
                 f"Subject: {subject}\n" + \
                 body + "\n\n"
+                if len(text + email_text) > 10_000:
+                    break
+                text += email_text
 
     with open(cache_file, 'w', encoding='utf-8') as f:
         f.write(text)

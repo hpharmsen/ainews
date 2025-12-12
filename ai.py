@@ -13,11 +13,11 @@ from database import get_last_newsletter_texts, cache_file_prefix
 from s3 import S3
 from log import lg
 
-COPY_WRITE_MODEL = 'gemini-2.5-pro'
-COPY_WRITE_MODEL_NAME = 'Gemini 2.5 Pro'
+COPY_WRITE_MODEL = 'openrouter/anthropic/claude-sonnet-4.5'
+COPY_WRITE_MODEL_NAME = 'Claude Sonnet 4.5'
 ART_DIRECTION_MODEL = "gpt-5"
 ART_DIRECTION_MODEL_NAME = "GPT-5"
-DESIGN_MODEL = "gemini-2.5-flash-image-preview"
+DESIGN_MODEL = "gemini-2.5-flash-image"
 DESIGN_MODEL_NAME = "Nano Banana"
 INFOGRAPHIC_MODEL = 'gemini-3-pro-image-preview'
 INFOGRAPHIC_MODEL_NAME = 'Nano Banana pro (Gemini 3 Pro Image)'
@@ -68,7 +68,7 @@ SELECTIE- EN RANGSCHIKKINGSCriteria
   6) Significante onderzoeksresultaten met praktische toepasbaarheid
 - SKIP: hype zonder substance, speculatieve toekomstvisies, commerciële uitingen, persoonlijke meningen zonder feiten
 - Bundel/dedup items die over hetzelfde gaan.
-- Bewaar maximaal [MAX_ARTICLES] items
+- Bewaar minimaal 4 en maximaal [MAX_ARTICLES] items
 
 DEDUPE-STRATEGIE
 - Match op: bedrijfsnaam + kernonderwerp + tijdsperiode (binnen 2 weken)
@@ -106,7 +106,7 @@ LINKS-KWALITEIT
 - Maximum 2 links per item, tenzij cruciaal
 
 UITVOERFORMAAT (STRICT)
-Geef je antwoord terug als een JSON-array met maximaal [MAX_ARTICLES] objecten met precies deze velden:
+Geef je antwoord terug als een JSON-array met minimaal 4 en maximaal [MAX_ARTICLES] objecten met precies deze velden:
 [
   {
     "title": "Korte, informatieve titel (geen clickbait). Gebruik geen markdown- of html opmaak maar plain text.",
@@ -118,7 +118,7 @@ Geef je antwoord terug als een JSON-array met maximaal [MAX_ARTICLES] objecten m
 
 VALIDATIE VOOR TERUGSTUREN
 1. Bovenal: is alles geschreven in in HP-stijl?
-2. Zijn het maximaal [MAX_ARTICLES] items?
+2. Zijn het minmaal 4 en maximaal [MAX_ARTICLES] items?
 3. Zijn alle items ongeveer even lang (4-8 zinnen)?
 4. Heeft elk item precies één retorische vraag (of nul)?
 5. Zijn Staan er niet meer dan 2 actietips in de nieuwbrief en zijn alle actie-tips concreet genoeg ("test X met dataset Y" ipv "overweeg X")?
@@ -169,26 +169,27 @@ def generate_ai_summary(schedule: str, text: str, verbose=False, cached=True):
             return summary
 
     # Generate new summary
-    model = Model(COPY_WRITE_MODEL)
+    model = Model(COPY_WRITE_MODEL) # , max_tokens=5000
     max_articles = 6 if schedule == 'daily' else 8
     latest_newsletters = get_last_newsletter_texts(schedule, limit=5)
     prompt = COPYWRITE_PROMPT\
                  .replace('[MAX_ARTICLES]', str(max_articles))\
                  .replace('[LATEST_NEWSLETTERS]', latest_newsletters)\
                  .replace('[NEWS_EMAILS]', text)
-    tokens = model.token_count(prompt)
     lg.info('Generating summary...')
     for _ in range(3):
         try:
-            summary = model.prompt(prompt, return_json=True, cached=True)
+            summary = model.prompt(prompt, return_json=True, cached=False)
             break
-        except:
+        except Exception as e:
             time.sleep(1)
     else:
-        summary = model.prompt(prompt, return_json=True, cached=True)
+        summary = model.prompt(prompt, return_json=True, cached=False)
 
     # Check the urls by opening them and see if they return a proper web page
     lg.info('Checking links ...')
+    if isinstance(summary, dict) and 'result' in summary:
+        summary = summary['result']
     for item in summary:
         for link in list(item['links']):
             resolved = check_and_resolve_url(link)

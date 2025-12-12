@@ -80,7 +80,7 @@ def add_to_database(schedule, title, newsletter_html, image_url):
     lg.info(f"✅ Nieuwsbrief toegevoegd aan de database (heeft eventuele bestaande voor {now.date()} vervangen).")
 
 
-def     get_last_newsletter_texts(schedule: str, limit: int = 1) -> str:
+def get_last_newsletter_texts(schedule: str, limit: int = 1) -> str:
     engine, table = db_connect()
     stmt = (
         select(table.c.text)
@@ -96,13 +96,22 @@ def     get_last_newsletter_texts(schedule: str, limit: int = 1) -> str:
     for text in records:
         try:
             part = text.split("<!-- Cards -->", 1)[1].split("<!-- Footer -->")[0]
-            part = re.sub(r"<[^>]*>", "", part)
+            #part = re.sub(r"<[^>]*>", "", part)
+            part = extract_h3_contents(part)
             parts += [part]
         except IndexError:
             # fallback als markers ontbreken
             parts += [text]
 
-    return "".join(parts)
+    return "".join(parts).replace('&nbsp', ' ').replace('  ', ' ')
+
+
+def extract_h3_contents(html: str) -> list[str]:
+    pattern = re.compile(
+        r"<h3\b[^>]*>(.*?)</h3>",
+        re.IGNORECASE | re.DOTALL
+    )
+    return "\n".join([re.sub(r"\s+", " ", match).strip() for match in pattern.findall(html)])
 
 
 def cache_file_prefix(schedule: str) -> str:
