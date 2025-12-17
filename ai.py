@@ -212,7 +212,7 @@ def generate_ai_summary(schedule: str, text: str, verbose=False, cached=True):
     return summary
 
 
-def generate_ai_image(articles: list[dict], schedule: str, cached: bool, max_retries: int = 3) -> Tuple[int, str]:
+def generate_ai_image(articles: list[dict], schedule: str, cached: bool, visual_selection: dict, max_retries: int = 3) -> Tuple[int, str]:
     """
     Genereer 1 afbeelding via Responses API + image_generation tool,
     met 4 image-URL's als STIJLREFERENTIE (geen content copy).
@@ -224,9 +224,8 @@ def generate_ai_image(articles: list[dict], schedule: str, cached: bool, max_ret
         lg.info('Loading image from cache')
         article_index = 0
     else:
-        lg.info('Selecting article for image...')
-        article_index: int
-        article_index, description = select_article_for_image(articles)
+        article_index = visual_selection['image_article']
+        description = visual_selection['image_description']
         prompt = create_image_prompt(articles[article_index], description, schedule)
 
         lg.info('Generating image...')
@@ -270,22 +269,62 @@ def generate_ai_image(articles: list[dict], schedule: str, cached: bool, max_ret
     raise TimeoutError('Failed to upload image to S3 after 3 attempts')
 
 
-def generate_infographic(articles: list[dict], schedule: str, cached: bool, max_retries: int = 3) -> Tuple[int, str]:
+def extract_relevant_source_text(article: dict, source_text: str) -> str:
+    """Extract alleen de tekst uit de bron die relevant is voor het artikel."""
+    prompt = f"""Hieronder staat de tekst van een nieuwsbrief-artikel en de volledige tekst van een bron-email.
+Extraheer ALLEEN de paragrafen/secties uit de bron die daadwerkelijk over hetzelfde onderwerp gaan als het artikel.
+Geef de relevante tekst terug, zonder toevoegingen.
+
+<artikel>
+Titel: {article.get('title', '')}
+Samenvatting: {article.get('summary', '')}
+</artikel>
+
+<bron_email>
+{source_text}
+</bron_email>
+
+Geef alleen de relevante tekst terug. Als er geen relevante tekst is, geef dan een lege string terug."""
+
+    model = Model('claude-haiku-4-5')
+    return model.prompt(prompt, return_json=False, cached=False)
+
+
+def generate_infographic(articles: list[dict], emails_dict: dict[str, str], schedule: str, cached: bool, visual_selection: dict, max_retries: int = 3) -> Tuple[int, str]:
     out_path = Path(cache_file_prefix(schedule) + "_infographic.png")
 
     if cached and os.path.isfile(out_path):
         lg.info("Loading image from cache")
         article_index = 0
     else:
-        lg.info("Selecting article for infographic...")
-        article_index, _description = select_article_for_infographic(articles)
-        prompt = f"""Ik heb een nieuwsbrief over AI. Nu wil ik een AI model een infographic laten genereren die goed past bij de inhoud van een van de artikelen. 
+        article_index = visual_selection['infographic_article']
+
+        # Haal relevante bronteksten op voor geselecteerd artikel
+        article = articles[article_index]
+        source_texts = []
+        for source in article.get('sources', []):
+            for email_source, email_text in emails_dict.items():
+                if source in email_source:
+                    relevant_text = extract_relevant_source_text(article, email_text)
+                    if relevant_text.strip():
+                        source_texts.append(relevant_text)
+                    break
+        source_content = '\n\n---\n\n'.join(source_texts) if source_texts else ''
+
+        prompt = f"""Ik heb een nieuwsbrief over AI. Nu wil ik een AI model een infographic laten genereren die goed past bij de inhoud van een van de artikelen.
             Ik wil geen generiek AI beeld met robots en futuristische lijnen maar een serieuze infographic die echt past bij de inhoud van dit artikel.
-            <artikel>
-            {articles[article_index]}
-            </artikel>
-            Genereer deze infographic. 
-        
+
+            <nieuwsbrief_artikel>
+            Titel: {article.get('title', '')}
+            Samenvatting: {article.get('summary', '')}
+            </nieuwsbrief_artikel>
+
+            <originele_bronnen>
+            {source_content}
+            </originele_bronnen>
+
+            Genereer een infographic die de kernpunten van dit artikel visualiseert.
+
             Richtlijnen voor de generatie van de infographic:
             - BELANGRIJK: Gebruik niet te veel tekst of te kleine letters. De afbeelding wordt namelijk nog verkleind.
             - Als je tekst gebruikt dan moet deze in het Nederlands zijn """
@@ -332,51 +371,32 @@ def generate_infographic(articles: list[dict], schedule: str, cached: bool, max_
     raise TimeoutError("Failed to upload infographic to S3 after 3 attempts")
 
 
-def select_article_for_image(articles: list[dict]) -> tuple[int, str]:
-
-    prompt = f"""Ik heb een nieuwsbrief over AI met de volgende {len(articles)} artikelen:
-    <nieuwsbrief>
-    {articles}
-    </nieuwsbrief>
-    
-    Nu wil ik een AI model een afbeelding laten genereren die goed past bij de inhoud. 
-    Ik wil geen generiek AI beeld met robots en futuristische lijnen maar het liefst een illustratie 
-    die echt past bij de inhoud van één van de artikelen.
-    
-    Doe de volgende stappen:
-    1. Denk na over welk van de {len(articles)} artikelen zich hier het beste voor leent en waarom?
-    2. Denk na over wat er dan in die illustratie zou moeten komen te staan.
-    3. Geef je antwoord in JSON met 2 velden: 
-    - article: index van het artikel dat je hebt geselecteerd (0 tot {len(articles)-1})
-    - description: een beschrijving van de afbeelding die je hebt geselecteerd"""
-
-    model = Model(ART_DIRECTION_MODEL)
-
-    res = retry_prompt(model, prompt)
-    return res['article'], res['description']
-
-
-def select_article_for_infographic(articles: list[dict]) -> tuple[int, str]:
+def select_articles_for_visuals(articles: list[dict]) -> dict:
+    """Selecteer twee verschillende artikelen: één voor de illustratie en één voor de infographic."""
     prompt = f"""Ik heb een nieuwsbrief over AI met de volgende {len(articles)} artikelen:
     <nieuwsbrief>
     {articles}
     </nieuwsbrief>
 
-    Nu wil ik een AI model een infographic laten genereren die goed past bij de inhoud. 
-    Ik wil geen generiek AI beeld met robots en futuristische lijnen maar een serieuze infographic
-    die echt past bij de inhoud van één van de artikelen.
+    Ik wil twee visuals genereren voor deze nieuwsbrief:
+    1. Een artistieke ILLUSTRATIE - geen generiek AI beeld met robots en futuristische lijnen, maar een illustratie die echt past bij de inhoud van één van de artikelen.
+    2. Een serieuze INFOGRAPHIC - met concrete data en feiten uit één van de artikelen.
+
+    BELANGRIJK: Kies twee VERSCHILLENDE artikelen. De illustratie en infographic mogen NIET over hetzelfde artikel gaan.
 
     Doe de volgende stappen:
-    1. Denk na over welk van de {len(articles)} artikelen zich hier het beste voor leent en waarom?
-    2. Denk na over wat er dan in die infographic zou moeten komen te staan.
-    3. Geef je antwoord in JSON met 2 velden: 
-    - article: index van het artikel dat je hebt geselecteerd (0 tot {len(articles) - 1})
-    - description: een beschrijving van de infographic"""
+    1. Analyseer welke artikelen zich het beste lenen voor een artistieke illustratie
+    2. Analyseer welke artikelen zich het beste lenen voor een infographic met data/feiten
+    3. Selecteer twee verschillende artikelen en beschrijf wat er in elke visual moet komen
+
+    Geef je antwoord in JSON met deze velden:
+    - image_article: index van het artikel voor de illustratie (0 tot {len(articles) - 1})
+    - image_description: beschrijving van de illustratie
+    - infographic_article: index van het artikel voor de infographic (0 tot {len(articles) - 1}, MOET ANDERS ZIJN dan image_article)
+    - infographic_description: beschrijving van de infographic"""
 
     model = Model(ART_DIRECTION_MODEL)
-
-    res = retry_prompt(model, prompt)
-    return res["article"], res["description"]
+    return retry_prompt(model, prompt)
 
 
 def create_image_prompt(article, description, schedule):

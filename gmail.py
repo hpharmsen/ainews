@@ -426,3 +426,18 @@ def decode_email_header(header_str: str) -> str:
         else:
             parts.append(part)
     return "".join(parts)
+
+
+def parse_emails_to_dict(raw_text: str) -> dict[str, str]:
+    """Parse raw email text into dict mapping source identifier to full text."""
+    emails = {}
+    parts = raw_text.split('==================================================')
+    for part in parts:
+        if not part.strip():
+            continue
+        for line in part.split('\n'):
+            if line.startswith('Source:'):
+                source = line.replace('Source:', '').strip()
+                emails[source] = part.strip()
+                break
+    return emails
