@@ -85,6 +85,7 @@ OUTPUT-STIJLSJABLOON PER ITEM
 
 AANWIJZINGEN
 - Schrijf ALLES in het Nederlands en in HP-stijl zoals hierboven.
+- Noem niet op welke datum iets is aangekondigd of gelanceerd.
 - Citeer niet; parafraseer. (Max. 10 woorden citeren indien essentieel.)
 - Gebruik absolute datums waar beschikbaar uit de bron.
 - Gebruik per item hoogstens één retorische vraag.
