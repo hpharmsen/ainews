@@ -28,7 +28,7 @@ def build_html_email(schedule: str, items: list[dict], newsletter_title: str, in
     cards_html = []
     for idx, item in enumerate(items):
         title = item.get("title", "")
-        summary = item.get("summary", "")
+        summary = item.get("summary", "").strip()
         summary = '<p>' + summary.replace('\n\n', '</p><p>').replace('\n', '<br>') + '</p>'
 
         # Voeg infographic toe na het gespecificeerde artikel
