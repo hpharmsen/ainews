@@ -192,6 +192,8 @@ def generate_ai_summary(schedule: str, text: str, verbose=False, cached=True):
     if isinstance(summary, dict) and 'result' in summary:
         summary = summary['result']
     for item in summary:
+        if 'summary' in item:
+            item['summary'] = item['summary'].strip()
         for link in list(item['links']):
             resolved = check_and_resolve_url(link)
             if resolved is None:
