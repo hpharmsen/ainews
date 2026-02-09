@@ -66,7 +66,7 @@ SELECTIE- EN RANGSCHIKKINGSCriteria
   4) Items die de originele nieuwsbrief zelf als belangrijk markeert
   5) Regelgeving en compliance-updates die directe impact hebben
   6) Significante onderzoeksresultaten met praktische toepasbaarheid
-- SKIP: hype zonder substance, speculatieve toekomstvisies, commerciële uitingen, persoonlijke meningen zonder feiten
+- SKIP: hype zonder substance, speculatieve toekomstvisies, commerciële uitingen, persoonlijke meningen zonder feiten en investeringen in AI tenzij het groot nieuws is
 - Bundel/dedup items die over hetzelfde gaan.
 - Bewaar minimaal 4 en maximaal [MAX_ARTICLES] items
 
