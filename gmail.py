@@ -12,7 +12,7 @@ from pathlib import Path
 from database import cache_file_prefix
 from log import lg
 
-FILTER_ON_LABEL='ai_news'
+FILTER_ON_LABEL='y_ai_news'
 # SELECTED_SENDERS = [
 # 'aitidbits+ai-coding@substack.com',
 # 'aiminds@mail.beehiiv.com'
