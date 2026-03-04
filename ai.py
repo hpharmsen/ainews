@@ -13,14 +13,14 @@ from database import get_last_newsletter_texts, cache_file_prefix
 from s3 import S3
 from log import lg
 
-COPY_WRITE_MODEL = 'openrouter/anthropic/claude-sonnet-4.5'
-COPY_WRITE_MODEL_NAME = 'Claude Sonnet 4.5'
+COPY_WRITE_MODEL = 'openrouter/anthropic/claude-sonnet-4.6'
+COPY_WRITE_MODEL_NAME = 'Claude Sonnet 4.6'
 ART_DIRECTION_MODEL = "gpt-5"
 ART_DIRECTION_MODEL_NAME = "GPT-5"
-DESIGN_MODEL = "gemini-2.5-flash-image"
+DESIGN_MODEL = 'gemini-3.1-flash-image-preview' # "gemini-2.5-flash-image"
 DESIGN_MODEL_NAME = "Nano Banana"
-INFOGRAPHIC_MODEL = 'gemini-3-pro-image-preview'
-INFOGRAPHIC_MODEL_NAME = 'Nano Banana pro (Gemini 3 Pro Image)'
+INFOGRAPHIC_MODEL = 'gemini-3.1-flash-image-preview' #'gemini-3-pro-image-preview'
+INFOGRAPHIC_MODEL_NAME = 'Nano Banana 2'
 IMAGE_STYLE = 'Mirabel'
 
 COLORS = ['rood', 'groen', 'grijs', 'bruin', 'oranje', 'paars', 'blauw']
@@ -170,7 +170,7 @@ def generate_ai_summary(schedule: str, text: str, verbose=False, cached=True):
             return summary
 
     # Generate new summary
-    model = Model(COPY_WRITE_MODEL) # , max_tokens=5000
+    model = Model(COPY_WRITE_MODEL, max_tokens=5000)
     max_articles = 6 if schedule == 'daily' else 8
     latest_newsletters = get_last_newsletter_texts(schedule, limit=5)
     prompt = COPYWRITE_PROMPT\

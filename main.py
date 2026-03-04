@@ -91,9 +91,28 @@ def main():
     handle_undelivered()
 
 
+def notify_error(error: Exception):
+    """Send error notification email via harmsen.nl/emailme service."""
+    import requests
+    import traceback
+    body = f'<pre>{traceback.format_exc()}</pre>'
+    try:
+        requests.post('https://harmsen.nl/emailme/', json={
+            'subject': f'AI Newsletter error: {error}',
+            'body': body,
+        })
+    except Exception:
+        lg.error(f'Failed to send error notification: {error}')
+
+
 if __name__ == '__main__':
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
     load_dotenv(override=True)
     lg.setup_logging('data/app.log')
-    main()
+    try:
+        main()
+    except Exception as e:
+        lg.critical(f'uncaught exception, application will terminate.\n{e}')
+        notify_error(e)
+        raise
 
