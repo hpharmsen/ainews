@@ -1,5 +1,5 @@
 python-dotenv
-justai
+justai==5.5.0
 justdays
 sqlalchemy
 psycopg2-binary

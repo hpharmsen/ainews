@@ -8,12 +8,14 @@ import httpx
 from justai import Model
 from justai.models.basemodel import RatelimitException
 from justdays import Day
+from pydantic import BaseModel, Field, HttpUrl
+from typing import Annotated
 
 from database import get_last_newsletter_texts, cache_file_prefix
 from s3 import S3
 from log import lg
 
-COPY_WRITE_MODEL = 'openrouter/anthropic/claude-sonnet-4.6'
+COPY_WRITE_MODEL = 'claude-sonnet-4-6'
 COPY_WRITE_MODEL_NAME = 'Claude Sonnet 4.6'
 ART_DIRECTION_MODEL = "gpt-5"
 ART_DIRECTION_MODEL_NAME = "GPT-5"
@@ -108,14 +110,12 @@ LINKS-KWALITEIT
 
 UITVOERFORMAAT (STRICT)
 Geef je antwoord terug als een JSON-array met minimaal 4 en maximaal [MAX_ARTICLES] objecten met precies deze velden:
-[
   {
     "title": "Korte, informatieve titel (geen clickbait). Gebruik geen markdown- of html opmaak maar plain text.",
     "summary": "Zie OUTPUT-STIJLSJABLOON; 4–8 zinnen met regelafbrekingen toegestaan. Gebruik geen markdown- of html opmaak maar plain text.",
     "links": ["https://canonieke-bron-1", "https://bron-2"],
     "sources": Lijst van bronnen die gebruikt werden om de samenvatting te maken
   }
-]
 
 VALIDATIE VOOR TERUGSTUREN
 1. Bovenal: is alles geschreven in in HP-stijl?
@@ -126,6 +126,7 @@ VALIDATIE VOOR TERUGSTUREN
 6. Bevatten alle items concrete data (datum/cijfer/percentage)? En staat deze data ook echt in de brontekst?
 7. Staan er geen items in die al in <laatste_nieuwsbrief> staan? Updates op die items mag wel.
 8. Alle links zijn geldig ogende https-URLs (zonder UTM’s).
+9. Is de output een array met records daarin?
 
 """
 
@@ -135,6 +136,28 @@ STYLE_IMAGES = [
     "https://s3.eu-west-1.amazonaws.com/harmsen.nl/nieuwsbrief/mirabel3.jpg",
     "https://s3.eu-west-1.amazonaws.com/harmsen.nl/nieuwsbrief/mirabel4.jpg",
 ]
+
+
+class Article(BaseModel):
+    title: str = Field(
+        description="Korte, informatieve titel (geen clickbait), plain text zonder markdown of HTML"
+    )
+    summary: str = Field(
+        description="4–8 zinnen met regelafbrekingen toegestaan, plain text zonder markdown of HTML"
+    )
+    links: list[HttpUrl] = Field(
+        description="Canonieke bronlinks gebruikt in het artikel"
+    )
+    sources: list[str] = Field(
+        description="Lijst van bronnen die gebruikt werden om de samenvatting te maken"
+    )
+
+
+class Summary(BaseModel):
+    articles: Annotated[
+        list[Article],
+        Field(min_length=4, max_length=8, description="Geselecteerde nieuwsartikelen")
+    ]
 
 
 def check_and_resolve_url(url: str) -> str | None:
@@ -178,41 +201,42 @@ def generate_ai_summary(schedule: str, text: str, verbose=False, cached=True):
                  .replace('[LATEST_NEWSLETTERS]', latest_newsletters)\
                  .replace('[NEWS_EMAILS]', text)
     lg.info('Generating summary...')
-    for _ in range(3):
+
+    for attempt in range(3):
         try:
-            summary = model.prompt(prompt, return_json=True, cached=False)
+            result = model.prompt(prompt, response_format=Summary, cached=False)
             break
         except Exception as e:
+            lg.warning(f'Summary generation attempt {attempt + 1} failed: {e}')
             time.sleep(1)
     else:
-        summary = model.prompt(prompt, return_json=True, cached=False)
+        result = model.prompt(prompt, response_format=Summary, cached=False)
+
+    summary = Summary(**result) if isinstance(result, dict) else result
 
     # Check the urls by opening them and see if they return a proper web page
     lg.info('Checking links ...')
-    if isinstance(summary, dict) and 'result' in summary:
-        summary = summary['result']
-    for item in summary:
-        if 'summary' in item:
-            item['summary'] = item['summary'].strip()
-        for link in list(item['links']):
-            resolved = check_and_resolve_url(link)
+    for article in summary.articles:
+        article.summary = article.summary.strip()
+        for link in list(article.links):
+            resolved = check_and_resolve_url(str(link))
             if resolved is None:
                 lg.warning(f'Link {link} is not valid')
-                item['links'].remove(link)
-            elif resolved != link:
+                article.links.remove(link)
+            elif resolved != str(link):
                 lg.info(f'Redirected {link} -> {resolved}')
-                try:
-                    idx = item['links'].index(link)
-                    item['links'][idx] = resolved
-                except ValueError:
-                    pass
+                idx = article.links.index(link)
+                article.links[idx] = HttpUrl(resolved)
 
-    # Save to cache
+    # Save to cache and convert to dicts for downstream use
+    result = []
     with open(cache_file, "w", encoding="utf-8") as f:
-        for item in summary:
-            f.write(json.dumps(item, ensure_ascii=False) + "\n")
+        for article in summary.articles:
+            article_dict = article.model_dump(mode='json')
+            f.write(json.dumps(article_dict, ensure_ascii=False) + "\n")
+            result.append(article_dict)
 
-    return summary
+    return result
 
 
 def generate_ai_image(articles: list[dict], schedule: str, cached: bool, visual_selection: dict, max_retries: int = 3) -> Tuple[int, str]:

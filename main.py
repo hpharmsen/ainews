@@ -97,7 +97,7 @@ def notify_error(error: Exception):
     import traceback
     body = f'<pre>{traceback.format_exc()}</pre>'
     try:
-        requests.post('https://harmsen.nl/emailme/', json={
+        requests.post('https://www.harmsen.nl/emailme/', json={
             'subject': f'AI Newsletter error: {error}',
             'body': body,
         })
