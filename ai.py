@@ -6,7 +6,7 @@ from typing import Tuple
 
 import httpx
 from justai import Model
-from justai.models.basemodel import RatelimitException
+from justai.models.basemodel import ModelOverloadException, RatelimitException
 from justdays import Day
 from pydantic import BaseModel, Field, HttpUrl
 from typing import Annotated
@@ -156,7 +156,7 @@ class Article(BaseModel):
 class Summary(BaseModel):
     articles: Annotated[
         list[Article],
-        Field(min_length=4, max_length=8, description="Geselecteerde nieuwsartikelen")
+        Field(min_length=1, max_length=8, description="Geselecteerde nieuwsartikelen")
     ]
 
 
@@ -365,6 +365,8 @@ def generate_infographic(articles: list[dict], emails_dict: dict[str, str], sche
                     lg.warning(f"Generating infographic (attempt {attempt + 1}/{max_retries})...")
 
                 img = model.generate_image(prompt)
+                if img is None:
+                    raise ValueError('Image generation returned None')
                 img.save(out_path, format="PNG")
                 lg.info("Image generated successfully")
                 break
@@ -473,8 +475,8 @@ def retry_prompt(model, prompt) -> dict:
         try:
             res = model.prompt(prompt, return_json=True, cached=False)
             return res
-        except RatelimitException:
-            lg.warning('Hitting rate limit, retrying...')
+        except (RatelimitException, ModelOverloadException):
+            lg.warning('Hitting rate limit or timeout, retrying...')
             time.sleep(5)
     else:
         raise RatelimitException

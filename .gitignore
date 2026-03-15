@@ -12,3 +12,4 @@
 .idea/
 __pycache__/
 /data/app.log.1
+/data/app.log.2
