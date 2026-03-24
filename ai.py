@@ -239,7 +239,7 @@ def generate_ai_summary(schedule: str, text: str, verbose=False, cached=True):
     return result
 
 
-def generate_ai_image(articles: list[dict], schedule: str, cached: bool, visual_selection: dict, max_retries: int = 3) -> Tuple[int, str]:
+def generate_ai_image(articles: list[dict], schedule: str, cached: bool, visual_selection: dict, max_retries: int = 5) -> Tuple[int, str]:
     """
     Genereer 1 afbeelding via Responses API + image_generation tool,
     met 4 image-URL's als STIJLREFERENTIE (geen content copy).
@@ -275,14 +275,14 @@ def generate_ai_image(articles: list[dict], schedule: str, cached: bool, visual_
                     raise Exception(f'Image generation timed out after {max_retries} attempts') from e
                     
                 lg.warning(f'Timeout occurred, retrying...')
-                time.sleep(1)
-                
+                time.sleep(min(30 * 2 ** attempt, 300))
+
             except Exception as e:
                 if attempt == max_retries - 1:  # Last attempt
                     lg.error(f'Failed to generate image: {str(e)}')
                     raise
                 lg.error(f'Error generating image: {str(e)}. Retrying...')
-                time.sleep(5)  # Shorter delay for non-timeout errors
+                time.sleep(min(30 * 2 ** attempt, 300))
 
     # Upload to S3
     s3 = S3('harmsen.nl')
@@ -317,7 +317,7 @@ Geef alleen de relevante tekst terug. Als er geen relevante tekst is, geef dan e
     return model.prompt(prompt, return_json=False, cached=False)
 
 
-def generate_infographic(articles: list[dict], emails_dict: dict[str, str], schedule: str, cached: bool, visual_selection: dict, max_retries: int = 3) -> Tuple[int, str]:
+def generate_infographic(articles: list[dict], emails_dict: dict[str, str], schedule: str, cached: bool, visual_selection: dict, max_retries: int = 5) -> Tuple[int, str]:
     out_path = Path(cache_file_prefix(schedule) + "_infographic.png")
 
     if cached and os.path.isfile(out_path):
@@ -379,14 +379,14 @@ def generate_infographic(articles: list[dict], emails_dict: dict[str, str], sche
                     ) from e
 
                 lg.warning(f"Timeout occurred, retrying...")
-                time.sleep(1)
+                time.sleep(min(30 * 2 ** attempt, 300))
 
             except Exception as e:
                 if attempt == max_retries - 1:  # Last attempt
                     lg.error(f"Failed to generate infographic: {str(e)}")
                     raise
                 lg.error(f"Error generating infographic: {str(e)}. Retrying...")
-                time.sleep(5)  # Shorter delay for non-timeout errors
+                time.sleep(min(30 * 2 ** attempt, 300))
 
     # Upload to S3
     s3 = S3("harmsen.nl")
