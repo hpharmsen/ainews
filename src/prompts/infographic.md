@@ -14,4 +14,6 @@ Genereer een infographic die de kernpunten van dit artikel visualiseert.
 
 Richtlijnen voor de generatie van de infographic:
 - BELANGRIJK: Gebruik niet te veel tekst of te kleine letters. De afbeelding wordt namelijk nog verkleind.
-- Als je tekst gebruikt dan moet deze in het Nederlands zijn
+- Maximaal 3-5 datapunten
+- Gebruik zo veel mogelijk de informatie en concrete cijfers/data uit de originele_bronnen. Het is de bedoeling dat de infographic een aanvulling is op de tekst. Niet alleen maar een grafische weergave ervan.
+- Als je tekst gebruikt dan moet deze in het Nederlands zijn.

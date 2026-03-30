@@ -5,7 +5,7 @@ Beschrijving van de afbeelding:
 </beschrijving>
 
 De volgende dingen zijn hierbij belangrijk:
-1. De inhoud van de afbeelding moet beeldvullend moet zijn. Ik wil ABSOLUUT geen randen om de afbeelding heen hebben.
+1. De inhoud van de afbeelding moet beeldvullend zijn. Ik wil ABSOLUUT geen randen om de afbeelding heen hebben.
 2. Er mag geen tekst in de afbeeldingen mag komen te staan.
 3. De 3 meegegeven afbeeldingen dienen als STIJLREFERENTIE (kleurpalet, penseelstreek, licht, textuur),
 4. Die afbeeldingen mogen alleen gebruikt worden voor de stijl; niet als inhoud die moet worden gerepliceerd.
@@ -13,3 +13,4 @@ De volgende dingen zijn hierbij belangrijk:
 6. De kleur {color} moet de basiskleur worden voor de afbeelding.
 
 Retourneer alleen de prompt. Geen andere tekst ervoor of erna.
+Aangezien dit naar een Engelstalig model gaat: schrijf deze prompt in het Engels.

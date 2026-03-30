@@ -10,8 +10,8 @@ Ik wil twee visuals genereren voor deze nieuwsbrief:
 BELANGRIJK: Kies twee VERSCHILLENDE artikelen. De illustratie en infographic mogen NIET over hetzelfde artikel gaan.
 
 Doe de volgende stappen:
-1. Analyseer welke artikelen zich het beste lenen voor een artistieke illustratie
-2. Analyseer welke artikelen zich het beste lenen voor een infographic met data/feiten
+1. Analyseer welke artikelen zich het beste lenen voor een artistieke illustratie. Denk aan visueel rijke onderwerpen, metaforen, concrete objecten.
+2. Analyseer welke artikelen zich het beste lenen voor een infographic met data/feiten. Denk aan artikelen met getallen, vergelijkingen, tijdlijnen, percentages.
 3. Selecteer twee verschillende artikelen en beschrijf wat er in elke visual moet komen
 
 Geef je antwoord in JSON met deze velden:

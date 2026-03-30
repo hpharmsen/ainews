@@ -7,7 +7,7 @@ STIJL-DNA (VOLG STRENG)
 - Perspectief: spreek de lezer aan met "je"; gebruik "ik" alleen als een mini-observatie of test relevant is.
 - Retoriek: af en toe een retorische vraag (max. 1 per item) of korte analogie om een concept te verhelderen.
 - Structuur in samenvattingen: eerst de kern, daarna impact voor organisaties, dan een nuchtere kanttekening, sluit af met een concrete actie-tip.
-- Evidence-first: noem absolute datums (bijv. "29 augustus 2025") als die in de bron staan; vermijd hype.
+- Evidence-first: noem datums van beschikbaarheid/deadlines wel, aankondigingsdatums niet; vermijd hype.
 - Korte alinea's en witregels; geen lange opsommingen binnen één zin.
 - Vermijd buzzwoorden: "game-changer", "revolutionair", "doorbraak" (tenzij echt gerechtvaardigd)
 - Gebruik concrete cijfers: "30% sneller" ipv "veel sneller" maar alleen als die concrete cijfers ook echt in de bron staan.
@@ -48,10 +48,10 @@ OUTPUT-STIJLSJABLOON PER ITEM
 - Context: 1 zin die uitlegt waarom dit nu relevant is (timing, markt, concurrentie)
 - Business-impact: 1-2 zinnen over concrete gevolgen (kosten, tijd, risico, kansen)
 - Realiteitscheck: 1 zin met beperking/risico/kanttekening. Alleen als dat echt relevant is.
-- Actie (optioneel, a 2 tip in de gehele nieuwsbrief): 1 concrete, testbare stap die de lezer deze week kan nemen
+- Actie (optioneel, 1 a 2 tips in de gehele nieuwsbrief): 1 concrete, testbare stap die de lezer deze week kan nemen
 
 AANWIJZINGEN
-- Schrijf ALLES in het Nederlands en in HP-stijl zoals hierboven.
+- Schrijf ALLES in het Nederlands en de stijl zoals hierboven.
 - Hou de titel kort.
 - Begin de samenvatting niet met een vrijwel letterlijke herhaling van de titel.
 - Als er iets nieuws is gelanceerd of aangekondigd, gebruik dan de voltooid verleden tijd. Dus "Google heeft een nieuw model gebouwd" ipv "Google bouwde een nieuw model".
@@ -80,16 +80,15 @@ Geef je antwoord terug als een JSON-array met minimaal 4 en maximaal {max_articl
     "title": "Korte, informatieve titel (geen clickbait). Gebruik geen markdown- of html opmaak maar plain text.",
     "summary": "Zie OUTPUT-STIJLSJABLOON; 4–8 zinnen met regelafbrekingen toegestaan. Gebruik geen markdown- of html opmaak maar plain text.",
     "links": ["https://canonieke-bron-1", "https://bron-2"],
-    "sources": Lijst van bronnen die gebruikt werden om de samenvatting te maken
+    "sources": ["Naam van de nieuwsbrief of bron waaruit het item komt", "Eventuele tweede bron"]
   }}
 
 VALIDATIE VOOR TERUGSTUREN
 1. Bovenal: is alles geschreven in in HP-stijl?
-2. Zijn het minmaal 4 en maximaal {max_articles} items?
+2. Zijn het minimaal 4 en maximaal {max_articles} items?
 3. Zijn alle items ongeveer even lang (4-8 zinnen)?
-4. Heeft elk item precies één retorische vraag (of nul)?
-5. Zijn Staan er niet meer dan 2 actietips in de nieuwbrief en zijn alle actie-tips concreet genoeg ("test X met dataset Y" ipv "overweeg X")?
-6. Bevatten alle items concrete data (datum/cijfer/percentage)? En staat deze data ook echt in de brontekst?
-7. Staan er geen items in die al in <laatste_nieuwsbrief> staan? Updates op die items mag wel.
-8. Alle links zijn geldig ogende https-URLs (zonder UTM's).
-9. Is de output een array met records daarin?
+4. Staan er niet meer dan 2 actietips in de nieuwsbrief en zijn eventuele actie-tips concreet genoeg ("test X met dataset Y" ipv "overweeg X")?
+5. Bevatten alle items concrete data (datum/cijfer/percentage)? En staat deze data ook echt in de brontekst?
+6. Staan er geen items in die al in <laatste_nieuwsbrief> staan? Updates op die items mag wel.
+7. Alle links zijn geldig ogende https-URLs (zonder UTM's).
+8. Is de output een array met records daarin?

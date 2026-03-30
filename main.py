@@ -4,7 +4,7 @@ import time
 
 from dotenv import load_dotenv
 
-from src.database import add_to_database
+from src.database import add_to_database, cleanup_cache
 from src.gmail import get_raw_mail_text, parse_emails_to_dict
 from justdays import Day
 
@@ -59,6 +59,7 @@ def create_title(schedule: str) -> str:
 
 def main():
     lg.info("============ Starting application ============")
+    cleanup_cache()
     schedule, cached = parse_command_line()
     text = get_raw_mail_text(schedule, cached=cached, verbose=VERBOSE)
     emails_dict = parse_emails_to_dict(text)

@@ -11,7 +11,7 @@ from justdays import Day
 from pydantic import BaseModel, Field, HttpUrl
 from typing import Annotated
 
-from src.database import get_last_newsletter_texts, cache_file_prefix
+from src.database import get_last_newsletter_summaries, cache_file_prefix
 from src.s3 import S3
 from src.log import lg
 
@@ -106,7 +106,7 @@ def generate_ai_summary(schedule: str, text: str, verbose=False, cached=True):
     # Generate new summary
     model = Model(COPY_WRITE_MODEL, max_tokens=5000)
     max_articles = 6 if schedule == 'daily' else 8
-    latest_newsletters = get_last_newsletter_texts(schedule, limit=5)
+    latest_newsletters = get_last_newsletter_summaries(schedule, limit=5)
     prompt = load_prompt('copywrite',
                          max_articles=max_articles,
                          latest_newsletters=latest_newsletters,
