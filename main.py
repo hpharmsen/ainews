@@ -4,15 +4,15 @@ import time
 
 from dotenv import load_dotenv
 
-from database import add_to_database
-from gmail import get_raw_mail_text, parse_emails_to_dict
+from src.database import add_to_database
+from src.gmail import get_raw_mail_text, parse_emails_to_dict
 from justdays import Day
 
-from ai import generate_ai_summary, generate_ai_image, generate_infographic, select_articles_for_visuals
-from formatter import create_html_email
-from log import lg
-from mailer import send_newsletter
-from undelivered import handle_undelivered
+from src.ai import generate_ai_summary, generate_ai_image, generate_infographic, select_articles_for_visuals
+from src.formatter import create_html_email
+from src.log import lg
+from src.mailer import send_newsletter
+from src.undelivered import handle_undelivered
 
 VERBOSE = True
 MONTHS = ["januari", "februari", "maart", "april", "mei", "juni", "juli", "augustus", "september", "oktober", "november", "december"]

@@ -4,12 +4,12 @@ import json
 from pathlib import Path
 from dotenv import load_dotenv
 
-from gmail import Mail
-from log import lg
-from mailer import delete_email
-from subscribers import update_subscription
+from src.gmail import Mail
+from src.log import lg
+from src.mailer import delete_email
+from src.subscribers import update_subscription
 
-undelivered_file = Path(__file__).parent / "data" / "undelivered.json"
+undelivered_file = Path(__file__).parent.parent / "data" / "undelivered.json"
 
 
 def load_undelivered_data() -> dict[str, int]:

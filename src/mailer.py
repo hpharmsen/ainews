@@ -11,9 +11,9 @@ from contextlib import contextmanager
 
 from justdays import Day
 
-from subscribers import get_subscribers
-from gmail import Mail
-from log import lg
+from src.subscribers import get_subscribers
+from src.gmail import Mail
+from src.log import lg
 
 REPLY_TO_EMAIL = "nieuwsbrief@harmsen.nl"
 DISPLAY_FROM_EMAIL = "nieuwsbrief@harmsen.nl"
@@ -113,7 +113,7 @@ def delete_email(message_id: str, folder: str = '[Gmail]/Sent Mail') -> bool:
 
 def update_last_sent_timestamp(schedule: str) -> None:
     """ schedule is 'daily' or 'weekly' """
-    last_sent_file = Path(__file__).parent / 'data' / 'last_sent.json'
+    last_sent_file = Path(__file__).parent.parent / 'data' / 'last_sent.json'
     if last_sent_file.exists():
         with open(last_sent_file, 'r') as f:
             last_sent_data = json.load(f)
@@ -128,14 +128,14 @@ def update_last_sent_timestamp(schedule: str) -> None:
 
 
 def mailerlog(s: str=''):
-    log_file = Path(__file__).parent / 'data' / 'mailerlog.txt'
+    log_file = Path(__file__).parent.parent / 'data' / 'mailerlog.txt'
     with open(log_file, 'a', encoding='utf-8') as f:
         f.write(f"{s}\n")
 
 
 def get_mailerlog(day:Day) -> set:
     res = set()
-    log_file = Path(__file__).parent / 'data' / 'mailerlog.txt'
+    log_file = Path(__file__).parent.parent / 'data' / 'mailerlog.txt'
     with open(log_file, 'r', encoding='utf-8') as f:
         for line in f:
             try:

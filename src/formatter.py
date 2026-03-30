@@ -2,14 +2,14 @@ import html
 from datetime import date
 from pathlib import Path
 
-from ai import (
+from src.ai import (
     COPY_WRITE_MODEL_NAME,
     DESIGN_MODEL_NAME,
     ART_DIRECTION_MODEL_NAME,
     INFOGRAPHIC_MODEL_NAME,
 )
-from database import cache_file_prefix
-from log import lg
+from src.database import cache_file_prefix
+from src.log import lg
 
 
 def build_html_email(schedule: str, items: list[dict], newsletter_title: str, intro_text: str, image_url: str, infographic_url: str | None = None, infographic_article_index: int | None = None) -> str:

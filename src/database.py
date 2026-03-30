@@ -8,7 +8,7 @@ from sqlalchemy import create_engine, MetaData, text, select, desc, func, and_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from justdays import Day
 
-from log import lg
+from src.log import lg
 
 
 def normalize_db_url(db_url):
@@ -116,4 +116,4 @@ def extract_h3_contents(html: str) -> list[str]:
 
 def cache_file_prefix(schedule: str) -> str:
     name =  str(Day()) if schedule == "daily" else f"week{Day().week_number()}"
-    return str(Path(__file__).parent / 'cache' / name)
+    return str(Path(__file__).parent.parent / 'cache' / name)

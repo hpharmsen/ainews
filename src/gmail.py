@@ -9,8 +9,8 @@ from email.utils import parseaddr, parsedate_to_datetime
 from email.header import decode_header
 from pathlib import Path
 
-from database import cache_file_prefix
-from log import lg
+from src.database import cache_file_prefix
+from src.log import lg
 
 FILTER_ON_LABEL='y_ai_news'
 # SELECTED_SENDERS = [
@@ -377,7 +377,7 @@ def get_raw_mail_text(schedule: str, cached: bool=False, verbose: bool=False):
         return
 
     # Read last sent date from last_sent.json
-    last_sent_file = Path(__file__).parent / 'data' / 'last_sent.json'
+    last_sent_file = Path(__file__).parent.parent / 'data' / 'last_sent.json'
     try:
         with open(last_sent_file, 'r') as f:
             last_sent_data = json.load(f)
