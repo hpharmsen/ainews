@@ -71,10 +71,15 @@ class Summary(BaseModel):
     ]
 
 
-def check_and_resolve_url(url: str) -> str | None:
-    """Returns a valid URL (possibly redirected) or None if invalid."""
+_BROWSER_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+}
+
+
+def _try_url(url: str) -> str | None:
+    """Check a single URL, following redirects. Returns resolved URL or None."""
     try:
-        resp = httpx.get(url, follow_redirects=False)
+        resp = httpx.get(url, headers=_BROWSER_HEADERS, follow_redirects=False)
         if 300 <= resp.status_code < 400:
             loc = resp.headers.get('Location')
             if not loc:
@@ -84,13 +89,32 @@ def check_and_resolve_url(url: str) -> str | None:
             except Exception:
                 pass
             try:
-                follow = httpx.get(loc)
+                follow = httpx.get(loc, headers=_BROWSER_HEADERS)
                 return loc if follow.status_code == 200 else None
             except Exception:
                 return None
         return url if resp.status_code == 200 else None
     except Exception:
         return None
+
+
+def check_and_resolve_url(url: str) -> str | None:
+    """Returns a valid URL (possibly redirected), tries trimming path segments if needed."""
+    resolved = _try_url(url)
+    if resolved:
+        return resolved
+    # Try removing trailing path segments one at a time
+    from urllib.parse import urlparse, urlunparse
+    parsed = urlparse(url)
+    path = parsed.path.rstrip('/')
+    while '/' in path:
+        path = path.rsplit('/', 1)[0]
+        trimmed = urlunparse(parsed._replace(path=path or '/'))
+        resolved = _try_url(trimmed)
+        if resolved:
+            lg.info(f'Trimmed URL works: {url} -> {resolved}')
+            return resolved
+    return None
 
 
 def generate_ai_summary(schedule: str, text: str, verbose=False, cached=True):

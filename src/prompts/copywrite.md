@@ -69,9 +69,10 @@ KWALITEITSCHECK VOOR ELKE SUMMARY
 - Staat er minimaal één datum, cijfer of ander concreet detail in?
 
 LINKS-KWALITEIT
+- KOPIEER URLs letterlijk uit de brontekst. Verzin of reconstrueer NOOIT een URL. Als je geen exacte URL vindt, laat het links-veld leeg.
 - Prioriteer: officiele release notes > labs/company blogs > tech media > andere media
 - Vermijd: social media links, tracking URLs, paywall-content
-- Controleer: zijn de links nog actief? (indien mogelijk)
+- Voeg NIETS toe aan het einde van een URL (geen extra padsegmenten, geen woorden)
 - Maximum 2 links per item, tenzij cruciaal
 
 UITVOERFORMAAT (STRICT)
