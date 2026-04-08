@@ -137,13 +137,14 @@ def generate_ai_summary(schedule: str, text: str, verbose=False, cached=True):
                          news_emails=text)
     lg.info('Generating summary...')
 
-    for attempt in range(3):
+    for attempt in range(5):
         try:
             result = model.prompt(prompt, response_format=Summary, cached=False)
             break
         except Exception as e:
-            lg.warning(f'Summary generation attempt {attempt + 1} failed: {e}')
-            time.sleep(1)
+            wait_time = 5 * (2 ** attempt)
+            lg.warning(f'Summary generation attempt {attempt + 1}/5 failed: {e}. Retrying in {wait_time}s...')
+            time.sleep(wait_time)
     else:
         result = model.prompt(prompt, response_format=Summary, cached=False)
 
