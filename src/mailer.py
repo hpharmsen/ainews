@@ -111,6 +111,21 @@ def delete_email(message_id: str, folder: str = '[Gmail]/Sent Mail') -> bool:
     return mail.delete_email(message_id, folder)
 
 
+def already_sent_today(schedule: str) -> bool:
+    """Check if a newsletter for this schedule was already sent today."""
+    log_file = Path(__file__).parent.parent / 'data' / 'mailerlog.txt'
+    today = str(Day())
+    try:
+        with open(log_file, 'r', encoding='utf-8') as f:
+            return any(
+                parts[0] == schedule and parts[1] == today
+                for line in f
+                if len(parts := line.strip().split()) >= 3
+            )
+    except FileNotFoundError:
+        return False
+
+
 def update_last_sent_timestamp(schedule: str) -> None:
     """ schedule is 'daily' or 'weekly' """
     last_sent_file = Path(__file__).parent.parent / 'data' / 'last_sent.json'

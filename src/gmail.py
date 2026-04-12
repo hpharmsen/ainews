@@ -412,8 +412,9 @@ def get_raw_mail_text(schedule: str, cached: bool=False, verbose: bool=False):
                     break
                 text += email_text
 
-    with open(cache_file, 'w', encoding='utf-8') as f:
-        f.write(text)
+    if text:
+        with open(cache_file, 'w', encoding='utf-8') as f:
+            f.write(text)
 
     return text
 

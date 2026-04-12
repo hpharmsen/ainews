@@ -11,7 +11,7 @@ from justdays import Day
 from src.ai import generate_ai_summary, generate_ai_image, generate_infographic, select_articles_for_visuals
 from src.formatter import create_html_email
 from src.log import lg
-from src.mailer import send_newsletter
+from src.mailer import send_newsletter, already_sent_today
 from src.undelivered import handle_undelivered
 
 VERBOSE = True
@@ -61,7 +61,16 @@ def main():
     lg.info("============ Starting application ============")
     cleanup_cache()
     schedule, cached = parse_command_line()
+
+    if already_sent_today(schedule):
+        lg.info(f"Newsletter '{schedule}' already sent today. Skipping.")
+        return
+
     text = get_raw_mail_text(schedule, cached=cached, verbose=VERBOSE)
+    if not text or not text.strip():
+        lg.warning(f"No emails found for '{schedule}'. Aborting to prevent empty newsletter.")
+        return
+
     emails_dict = parse_emails_to_dict(text)
     articles = generate_ai_summary(schedule, text, cached=cached, verbose=VERBOSE)
 
@@ -74,7 +83,10 @@ def main():
     articles = [articles[article_index]] + articles[:article_index] + articles[article_index + 1:]
 
     # Adjust infographic index after reordering (image article moved to front)
-    infographic_original_index = visual_selection['infographic_article']
+    infographic_original_index = visual_selection.get('infographic_article')
+    if infographic_original_index is None:
+        lg.warning('No infographic article selected by AI, using fallback')
+        infographic_original_index = 1 if article_index != 1 else 2
     if infographic_original_index < article_index:
         infographic_adjusted_index = infographic_original_index + 1
     else:
