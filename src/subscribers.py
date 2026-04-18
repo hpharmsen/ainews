@@ -47,17 +47,22 @@ def get_subscribers(status: str) -> List[str]:
         raise Exception(f"Error getting subscribers: {e}")
 
 
+def get_subscriber_status(email: str) -> dict | None:
+    """Get subscriber status and updated_at timestamp."""
+    try:
+        with db() as (conn, tables):
+            t = tables['nieuwsbrief_subscriber']
+            query = select(t.c.status, t.c.updated_at).where(t.c.email == email)
+            row = conn.execute(query).fetchone()
+            if row:
+                return {'status': row[0], 'updated_at': row[1]}
+    except Exception as e:
+        lg.error(f'Error getting subscriber status for {email}: {e}')
+    return None
+
+
 def update_subscription(email: str, status: str) -> bool:
-    """
-    Update subscriber status.
-
-    Args:
-        email: Subscriber email address
-        status: New status for the subscriber
-
-    Returns:
-        True if successful, False otherwise
-    """
+    """Update subscriber status. Resets bounce history when re-subscribing."""
     try:
         with db() as (conn, tables):
             subscriber_table = tables['nieuwsbrief_subscriber']
@@ -66,7 +71,11 @@ def update_subscription(email: str, status: str) -> bool:
                 query = update(subscriber_table).where(subscriber_table.c.email == email).values(status=status)
                 result = conn.execute(query)
                 if result.rowcount > 0:
-                    lg.info(f"Marked {email} as undeliverable")
+                    lg.info(f"Updated {email} to status '{status}'")
+                    # Reset bounce history when re-subscribing
+                    if status in ('daily', 'weekly'):
+                        from src.undelivered import reset_undelivered
+                        reset_undelivered(email)
                     return True
                 else:
                     lg.error(f"Failed to update status for {email}")

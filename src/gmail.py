@@ -254,7 +254,8 @@ class Mail:
                     undelivered_emails.append({
                         'email_id': email_uid.decode('utf-8'),
                         'recipient_email': recipient_info['recipient_email'],
-                        'is_spam_rejection': recipient_info.get('is_spam_rejection', False)
+                        'is_spam_rejection': recipient_info.get('is_spam_rejection', False),
+                        'is_permanent': recipient_info.get('is_permanent', False)
                     })
 
             return undelivered_emails
@@ -281,16 +282,23 @@ class Mail:
                 'X-Failed-Recipients'
             ]
 
+            import re
+
+            # Check DSN Status header for permanent vs temporary
+            status_header = msg.get('Status', '')
+            diagnostic = msg.get('Diagnostic-Code', '')
+            is_permanent = bool(re.search(r'5\.\d+\.\d+', status_header + ' ' + diagnostic))
+
             for header in headers_to_check:
                 value = msg.get(header, '')
                 if value:
                     # Extract email from header value (format might be 'rfc822;email@domain.com')
-                    import re
                     email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', value)
                     if email_match:
                         return {
                             'recipient_email': email_match.group(),
-                            'is_spam_rejection': False
+                            'is_spam_rejection': False,
+                            'is_permanent': is_permanent
                         }
 
             # If headers don't contain the info, search in the message body
@@ -320,6 +328,13 @@ class Mail:
                     for indicator in spam_indicators
                 )
 
+                # Detect permanent (5xx) vs temporary (4xx) bounce
+                # Look for SMTP status codes like "550", "5.1.1", "452", "4.2.2"
+                is_permanent = bool(re.search(
+                    r'(?:^|\s)5\.\d+\.\d+|(?:^|\s)5[0-9]{2}\s',
+                    body, re.MULTILINE
+                ))
+
                 # Look for patterns to extract recipient email from bounce messages
                 patterns = [
                     # Gmail delivery incomplete pattern: "delivering your message to email@domain.com"
@@ -338,7 +353,8 @@ class Mail:
                     if matches:
                         return {
                             'recipient_email': matches[0],
-                            'is_spam_rejection': is_spam_rejection
+                            'is_spam_rejection': is_spam_rejection,
+                            'is_permanent': is_permanent
                         }
 
             return None
