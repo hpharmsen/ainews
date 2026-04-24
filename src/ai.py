@@ -19,10 +19,12 @@ COPY_WRITE_MODEL = 'claude-sonnet-4-6'
 COPY_WRITE_MODEL_NAME = 'Claude Sonnet 4.6'
 ART_DIRECTION_MODEL = "gpt-5"
 ART_DIRECTION_MODEL_NAME = "GPT-5"
-DESIGN_MODEL = 'gemini-3.1-flash-image-preview' # "gemini-2.5-flash-image"
-DESIGN_MODEL_NAME = "Nano Banana"
-INFOGRAPHIC_MODEL = 'gemini-3.1-flash-image-preview' #'gemini-3-pro-image-preview'
+DESIGN_MODEL = 'openrouter/openai/gpt-5.4-image-2'
+DESIGN_MODEL_NAME = 'GPT 5.4 Image 2'
+DESIGN_MODEL_SHADOW = ''
+INFOGRAPHIC_MODEL = 'gemini-3.1-flash-image-preview'
 INFOGRAPHIC_MODEL_NAME = 'Nano Banana 2'
+INFOGRAPHIC_MODEL_SHADOW = ''
 IMAGE_STYLE = 'Mirabel'
 
 PROMPTS_DIR = Path(__file__).parent / 'prompts'
@@ -175,6 +177,27 @@ def generate_ai_summary(schedule: str, text: str, verbose=False, cached=True):
     return result
 
 
+def _generate_shadow_image(shadow_model: str, prompt: str, out_path: Path, style_images: list[str] | None = None):
+    """Generate a shadow image for model comparison. Failures are logged but never block the main flow."""
+    if not shadow_model:
+        return
+    shadow_path = out_path.with_stem(out_path.stem + '_shadow')
+    if shadow_path.is_file():
+        return
+    try:
+        lg.info(f'Generating shadow image with {shadow_model}...')
+        model = Model(shadow_model)
+        if style_images:
+            img = model.generate_image(prompt, style_images, size=(600, 300))
+        else:
+            img = model.generate_image(prompt)
+        if img:
+            img.save(shadow_path, format='PNG')
+            lg.info(f'Shadow image saved to {shadow_path}')
+    except Exception as e:
+        lg.warning(f'Shadow image generation failed: {e}')
+
+
 def generate_ai_image(articles: list[dict], schedule: str, cached: bool, visual_selection: dict, max_retries: int = 5) -> Tuple[int, str]:
     """
     Genereer 1 afbeelding via Responses API + image_generation tool,
@@ -204,12 +227,12 @@ def generate_ai_image(articles: list[dict], schedule: str, cached: bool, visual_
                 lg.info('Image generated successfully')
 
                 break
-                
+
             except (httpx.ReadTimeout, TimeoutError) as e:
                 if attempt == max_retries - 1:  # Last attempt
                     lg.error(f'Failed to generate image after {max_retries} attempts')
                     raise Exception(f'Image generation timed out after {max_retries} attempts') from e
-                    
+
                 lg.warning(f'Timeout occurred, retrying...')
                 time.sleep(min(30 * 2 ** attempt, 300))
 
@@ -219,6 +242,10 @@ def generate_ai_image(articles: list[dict], schedule: str, cached: bool, visual_
                     raise
                 lg.error(f'Error generating image: {str(e)}. Retrying...')
                 time.sleep(min(30 * 2 ** attempt, 300))
+
+    if DESIGN_MODEL_SHADOW:
+        prompt = create_image_prompt(articles[article_index], visual_selection.get('image_description', ''), schedule)
+        _generate_shadow_image(DESIGN_MODEL_SHADOW, prompt, out_path, STYLE_IMAGES)
 
     # Upload to S3
     s3 = S3('harmsen.nl')
@@ -252,23 +279,24 @@ def generate_infographic(articles: list[dict], emails_dict: dict[str, str], sche
     else:
         article_index = visual_selection['infographic_article']
 
-        # Haal relevante bronteksten op voor geselecteerd artikel
-        article = articles[article_index]
-        source_texts = []
-        for source in article.get('sources', []):
-            for email_source, email_text in emails_dict.items():
-                if source in email_source:
-                    relevant_text = extract_relevant_source_text(article, email_text)
-                    if relevant_text.strip():
-                        source_texts.append(relevant_text)
-                    break
-        source_content = '\n\n---\n\n'.join(source_texts) if source_texts else ''
+    # Build infographic prompt (needed for both main generation and shadow)
+    article = articles[article_index]
+    source_texts = []
+    for source in article.get('sources', []):
+        for email_source, email_text in emails_dict.items():
+            if source in email_source:
+                relevant_text = extract_relevant_source_text(article, email_text)
+                if relevant_text.strip():
+                    source_texts.append(relevant_text)
+                break
+    source_content = '\n\n---\n\n'.join(source_texts) if source_texts else ''
 
-        prompt = load_prompt('infographic',
-                             title=article.get('title', ''),
-                             summary=article.get('summary', ''),
-                             source_content=source_content)
+    prompt = load_prompt('infographic',
+                         title=article.get('title', ''),
+                         summary=article.get('summary', ''),
+                         source_content=source_content)
 
+    if not (cached and os.path.isfile(out_path)):
         lg.info("Generating infographic...")
         model = Model(INFOGRAPHIC_MODEL)
         # Retry logic with exponential backoff
@@ -300,6 +328,9 @@ def generate_infographic(articles: list[dict], emails_dict: dict[str, str], sche
                     raise
                 lg.error(f"Error generating infographic: {str(e)}. Retrying...")
                 time.sleep(min(30 * 2 ** attempt, 300))
+
+    if INFOGRAPHIC_MODEL_SHADOW:
+        _generate_shadow_image(INFOGRAPHIC_MODEL_SHADOW, prompt, out_path)
 
     # Upload to S3
     s3 = S3("harmsen.nl")

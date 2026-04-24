@@ -21,10 +21,11 @@ def parse_command_line():
     args = sys.argv[1:]
     cached = False
     
-    # Handle --cached flag
+    # Handle flags
     if "--cached" in args:
         cached = True
         args = [arg for arg in args if arg != "--cached"]
+    args = [arg for arg in args if not arg.startswith("--")]
     
     match args:
         case []:
@@ -62,7 +63,7 @@ def main():
     cleanup_cache()
     schedule, cached = parse_command_line()
 
-    if already_sent_today(schedule):
+    if already_sent_today(schedule) and not '--resend' in sys.argv:
         lg.info(f"Newsletter '{schedule}' already sent today. Skipping.")
         return
 
