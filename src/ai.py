@@ -17,38 +17,20 @@ from src.log import lg
 
 COPY_WRITE_MODEL = 'claude-sonnet-4-6'
 COPY_WRITE_MODEL_NAME = 'Claude Sonnet 4.6'
-ART_DIRECTION_MODEL = "gpt-5"
-ART_DIRECTION_MODEL_NAME = "GPT-5"
-DESIGN_MODEL = 'openrouter/openai/gpt-5.4-image-2'
-DESIGN_MODEL_NAME = 'GPT 5.4 Image 2'
-DESIGN_MODEL_SHADOW = ''
+SELECTION_MODEL = 'gpt-5'
+ART_MODEL = 'gpt-image-2-2026-04-21'
+ART_MODEL_NAME = 'GPT Image 2'
 INFOGRAPHIC_MODEL = 'gemini-3.1-flash-image-preview'
 INFOGRAPHIC_MODEL_NAME = 'Nano Banana 2'
-INFOGRAPHIC_MODEL_SHADOW = ''
-IMAGE_STYLE = 'Mirabel'
 
 PROMPTS_DIR = Path(__file__).parent / 'prompts'
 COLORS = ['rood', 'groen', 'grijs', 'bruin', 'oranje', 'paars', 'blauw']
-BIG_LABS = ['OpenAI', 'Google', 'Meta', 'Facebook', 'Instagram','Microsoft', 'IBM', 'Apple', 'Amazon', 'xAI',
-            'Perplexity', 'Anthropic', 'Nvidia', 'Deepseek', 'GPT-5']
-BRANDS = {lab:lab for lab in BIG_LABS}
-BRANDS['GPT'] = 'OpenAI'
-BRANDS['Claude'] = 'Anthropic'
-BRANDS['Grok'] = 'xAI'
-
 
 def load_prompt(name: str, **kwargs) -> str:
     """Load a prompt template from the prompts folder and substitute variables."""
     text = (PROMPTS_DIR / f'{name}.md').read_text()
     return text.format(**kwargs) if kwargs else text
 
-
-STYLE_IMAGES = [
-    "https://s3.eu-west-1.amazonaws.com/harmsen.nl/nieuwsbrief/mirabel1.jpg",
-    "https://s3.eu-west-1.amazonaws.com/harmsen.nl/nieuwsbrief/mirabel2.jpg",
-    "https://s3.eu-west-1.amazonaws.com/harmsen.nl/nieuwsbrief/mirabel3.jpg",
-    "https://s3.eu-west-1.amazonaws.com/harmsen.nl/nieuwsbrief/mirabel4.jpg",
-]
 
 
 class Article(BaseModel):
@@ -177,75 +159,50 @@ def generate_ai_summary(schedule: str, text: str, verbose=False, cached=True):
     return result
 
 
-def _generate_shadow_image(shadow_model: str, prompt: str, out_path: Path, style_images: list[str] | None = None):
-    """Generate a shadow image for model comparison. Failures are logged but never block the main flow."""
-    if not shadow_model:
-        return
-    shadow_path = out_path.with_stem(out_path.stem + '_shadow')
-    if shadow_path.is_file():
-        return
-    try:
-        lg.info(f'Generating shadow image with {shadow_model}...')
-        model = Model(shadow_model)
-        if style_images:
-            img = model.generate_image(prompt, style_images, size=(600, 300))
-        else:
-            img = model.generate_image(prompt)
-        if img:
-            img.save(shadow_path, format='PNG')
-            lg.info(f'Shadow image saved to {shadow_path}')
-    except Exception as e:
-        lg.warning(f'Shadow image generation failed: {e}')
-
-
-def generate_ai_image(articles: list[dict], schedule: str, cached: bool, visual_selection: dict, max_retries: int = 5) -> Tuple[int, str]:
-    """
-    Genereer 1 afbeelding via Responses API + image_generation tool,
-    met 4 image-URL's als STIJLREFERENTIE (geen content copy).
-    Slaat de 1e gegenereerde afbeelding op als PNG en retourneert het pad (of upload jouw S3).
-    """
+def generate_ai_image(articles: list[dict], schedule: str, cached: bool, article_index: int, max_retries: int = 5) -> Tuple[int, str]:
+    """Genereer header image met gpt-image-2 in Art Deco stijl."""
     out_path = Path(cache_file_prefix(schedule) + '.png')
 
     if cached and os.path.isfile(out_path):
         lg.info('Loading image from cache')
         article_index = 0
     else:
-        article_index = visual_selection['image_article']
-        description = visual_selection['image_description']
-        prompt = create_image_prompt(articles[article_index], description, schedule)
+        article = articles[article_index]
+        if schedule == 'daily':
+            color = COLORS[Day().day_of_week()]
+        else:
+            color = COLORS[Day().week_number() % len(COLORS)]
+
+        prompt = load_prompt('art_prompt',
+                             title=article.get('title', ''),
+                             summary=article.get('summary', ''),
+                             color=color)
 
         lg.info('Generating image...')
-        model = Model(DESIGN_MODEL)
-        # Retry logic with exponential backoff
+        model = Model(ART_MODEL)
         for attempt in range(max_retries):
             try:
                 if attempt > 0:
                     lg.warning(f'Generating image (attempt {attempt + 1}/{max_retries})...')
 
-                img = model.generate_image(prompt, STYLE_IMAGES, size=(600, 300))
-                img.save(out_path, format="PNG")
+                img = model.generate_image(prompt, size=(550, 275))
+                img.save(out_path, format='PNG')
                 lg.info('Image generated successfully')
-
                 break
 
             except (httpx.ReadTimeout, TimeoutError) as e:
-                if attempt == max_retries - 1:  # Last attempt
+                if attempt == max_retries - 1:
                     lg.error(f'Failed to generate image after {max_retries} attempts')
                     raise Exception(f'Image generation timed out after {max_retries} attempts') from e
-
                 lg.warning(f'Timeout occurred, retrying...')
                 time.sleep(min(30 * 2 ** attempt, 300))
 
             except Exception as e:
-                if attempt == max_retries - 1:  # Last attempt
+                if attempt == max_retries - 1:
                     lg.error(f'Failed to generate image: {str(e)}')
                     raise
                 lg.error(f'Error generating image: {str(e)}. Retrying...')
                 time.sleep(min(30 * 2 ** attempt, 300))
-
-    if DESIGN_MODEL_SHADOW:
-        prompt = create_image_prompt(articles[article_index], visual_selection.get('image_description', ''), schedule)
-        _generate_shadow_image(DESIGN_MODEL_SHADOW, prompt, out_path, STYLE_IMAGES)
 
     # Upload to S3
     s3 = S3('harmsen.nl')
@@ -255,7 +212,7 @@ def generate_ai_image(articles: list[dict], schedule: str, cached: bool, visual_
             return article_index, url
         except Exception as e:
             lg.error(f'Error uploading to S3, retrying... (attempt {attempt + 1}/3)')
-            time.sleep(5 * (attempt + 1))  # Exponential backoff for S3 upload
+            time.sleep(5 * (attempt + 1))
     raise TimeoutError('Failed to upload image to S3 after 3 attempts')
 
 
@@ -329,9 +286,6 @@ def generate_infographic(articles: list[dict], emails_dict: dict[str, str], sche
                 lg.error(f"Error generating infographic: {str(e)}. Retrying...")
                 time.sleep(min(30 * 2 ** attempt, 300))
 
-    if INFOGRAPHIC_MODEL_SHADOW:
-        _generate_shadow_image(INFOGRAPHIC_MODEL_SHADOW, prompt, out_path)
-
     # Upload to S3
     s3 = S3("harmsen.nl")
     for attempt in range(3):
@@ -351,36 +305,8 @@ def select_articles_for_visuals(articles: list[dict]) -> dict:
                          articles=articles,
                          max_index=len(articles) - 1)
 
-    model = Model(ART_DIRECTION_MODEL)
+    model = Model(SELECTION_MODEL)
     return retry_prompt(model, prompt)
-
-
-def create_image_prompt(article, description, schedule):
-    cache_file = Path(cache_file_prefix(schedule) + "_image_prompt.txt")
-    if cache_file.is_file():
-        with open(cache_file, 'r', encoding='utf-8') as f:
-            return f.read()
-
-    lg.info('Generating image prompt...')
-    if schedule == "daily":
-        color = COLORS[Day().day_of_week()]
-    else:
-        color = COLORS[Day().week_number() % len(COLORS)]
-
-    prompt = load_prompt('image_prompt', description=description, color=color)
-    index = 7
-    for brand, lab in BRANDS.items():
-        if brand in article["title"] or brand in article["summary"]:
-            prompt += f"\n    {index}. Het {lab} logo moet opgenomenen worden op in de afbeelding."
-            index += 1
-
-    model = Model(ART_DIRECTION_MODEL)
-    image_prompt = model.prompt(prompt, return_json=False, cached=False)
-
-    with open(cache_file, 'w', encoding='utf-8') as f:
-        f.write(image_prompt)
-
-    return image_prompt
 
 
 def retry_prompt(model, prompt) -> dict:

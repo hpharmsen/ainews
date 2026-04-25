@@ -20,18 +20,20 @@ MONTHS = ["januari", "februari", "maart", "april", "mei", "juni", "juli", "augus
 def parse_command_line():
     args = sys.argv[1:]
     cached = False
-    
+    dry_run = False
+
     # Handle flags
     if "--cached" in args:
         cached = True
-        args = [arg for arg in args if arg != "--cached"]
+    if "--dry-run" in args:
+        dry_run = True
     args = [arg for arg in args if not arg.startswith("--")]
-    
+
     match args:
         case []:
             print_usage()
         case [cmd] if cmd in ("daily", "weekly"):
-            return cmd, cached
+            return cmd, cached, dry_run
         case [cmd, *_]:
             print(f"Invalid command: {cmd}")
     sys.exit(1)
@@ -44,7 +46,7 @@ def print_usage():
     print("   weekly - Send weekly newsletter")
     print("Options:")
     print("   --cached  - Use cached data when available")
-    print("   weekly - Send weekly newsletter")
+    print("   --dry-run - Generate newsletter but don't send")
 
 
 def create_title(schedule: str) -> str:
@@ -61,7 +63,7 @@ def create_title(schedule: str) -> str:
 def main():
     lg.info("============ Starting application ============")
     cleanup_cache()
-    schedule, cached = parse_command_line()
+    schedule, cached, dry_run = parse_command_line()
 
     if already_sent_today(schedule) and not '--resend' in sys.argv:
         lg.info(f"Newsletter '{schedule}' already sent today. Skipping.")
@@ -80,7 +82,7 @@ def main():
     visual_selection = select_articles_for_visuals(articles)
 
     # Image
-    article_index, image_url = generate_ai_image(articles, schedule, cached=cached, visual_selection=visual_selection)
+    article_index, image_url = generate_ai_image(articles, schedule, cached=cached, article_index=visual_selection['image_article'])
     articles = [articles[article_index]] + articles[:article_index] + articles[article_index + 1:]
 
     # Adjust infographic index after reordering (image article moved to front)
@@ -100,6 +102,9 @@ def main():
     title = create_title(schedule)
     html_mail = create_html_email(schedule, articles, title, image_url, infographic_url, infographic_article_index)
     add_to_database(schedule, title, html_mail, image_url)
+    if dry_run:
+        lg.info('Dry run: newsletter generated but not sent')
+        return
     send_newsletter(schedule, html_mail, title)
     time.sleep(60)
     handle_undelivered()
