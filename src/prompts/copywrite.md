@@ -59,6 +59,7 @@ AANWIJZINGEN
 - Citeer niet; parafraseer. (Max. 10 woorden citeren indien essentieel.)
 - Gebruik absolute datums waar beschikbaar uit de bron.
 - Gebruik per item hoogstens één retorische vraag.
+- Gebruik geen em-dashes. Gebruik in plaats daar van komma's.
 - Gebruik geen markdown-opmaak (geen **vet** of #-koppen) binnen de JSON-velden.
 - Links: kies 1–3 meest gezaghebbende/brontechnische URLs (release notes, docs, blog van het lab). Vermijd tracking-parameters.
 
@@ -85,7 +86,7 @@ Geef je antwoord terug als een JSON-array met minimaal 4 en maximaal {max_articl
   }}
 
 VALIDATIE VOOR TERUGSTUREN
-1. Bovenal: is alles geschreven in in HP-stijl?
+1. Bovenal: Check je zinnen. Is het lekker lopende tekst?
 2. Zijn het minimaal 4 en maximaal {max_articles} items?
 3. Zijn alle items ongeveer even lang (4-8 zinnen)?
 4. Staan er niet meer dan 2 actietips in de nieuwsbrief en zijn eventuele actie-tips concreet genoeg ("test X met dataset Y" ipv "overweeg X")?

@@ -90,7 +90,11 @@ def main():
     if infographic_original_index is None:
         lg.warning('No infographic article selected by AI, using fallback')
         infographic_original_index = 1 if article_index != 1 else 2
-    if infographic_original_index < article_index:
+    if infographic_original_index >= len(articles):
+        infographic_original_index = min(1, len(articles) - 1)
+    if infographic_original_index == article_index:
+        infographic_adjusted_index = 0
+    elif infographic_original_index < article_index:
         infographic_adjusted_index = infographic_original_index + 1
     else:
         infographic_adjusted_index = infographic_original_index
