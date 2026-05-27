@@ -8,7 +8,7 @@ from src.database import add_to_database, cleanup_cache
 from src.gmail import get_raw_mail_text, parse_emails_to_dict
 from justdays import Day
 
-from src.ai import generate_ai_summary, generate_ai_image, generate_infographic, select_articles_for_visuals
+from src.ai import generate_ai_summary, edit_articles, generate_ai_image, generate_infographic, select_articles_for_visuals
 from src.formatter import create_html_email
 from src.log import lg
 from src.mailer import send_newsletter, already_sent_today
@@ -76,6 +76,7 @@ def main():
 
     emails_dict = parse_emails_to_dict(text)
     articles = generate_ai_summary(schedule, text, cached=cached, verbose=VERBOSE)
+    articles = edit_articles(schedule, articles, cached=cached, verbose=VERBOSE)
 
     # Select articles for both visuals in one prompt
     lg.info('Selecting articles for visuals...')

@@ -22,6 +22,8 @@ ART_MODEL = 'gpt-image-2-2026-04-21'
 ART_MODEL_NAME = 'GPT Image 2'
 INFOGRAPHIC_MODEL = 'gemini-3.1-flash-image-preview'
 INFOGRAPHIC_MODEL_NAME = 'Nano Banana 2'
+EDITOR_MODEL = 'claude-opus-4-7'
+EDITOR_MODEL_NAME = 'Claude Opus 4.7'
 
 PROMPTS_DIR = Path(__file__).parent / 'prompts'
 COLORS = ['rood', 'groen', 'grijs', 'bruin', 'oranje', 'paars', 'blauw']
@@ -53,6 +55,11 @@ class Summary(BaseModel):
         list[Article],
         Field(min_length=1, max_length=8, description="Geselecteerde nieuwsartikelen")
     ]
+
+
+class EditedArticle(BaseModel):
+    title: str = Field(description="Verbeterde of onveranderde titel")
+    summary: str = Field(description="Verbeterde of onveranderde samenvatting")
 
 
 _BROWSER_HEADERS = {
@@ -157,6 +164,50 @@ def generate_ai_summary(schedule: str, text: str, verbose=False, cached=True):
             result.append(article_dict)
 
     return result
+
+
+def edit_articles(schedule: str, articles: list[dict], cached: bool = True, verbose: bool = False) -> list[dict]:
+    """Loop alle artikelen langs een editor-LLM voor tekstuele verbetering.
+    Past alleen title + summary aan; links en sources blijven onaangetast."""
+    cache_file = Path(cache_file_prefix(schedule) + '_edited.jsonl')
+    if cached and cache_file.is_file():
+        with open(cache_file, 'r', encoding='utf-8') as f:
+            edited = [json.loads(line) for line in f]
+            if verbose:
+                lg.info('Loaded edited articles from cache')
+            return edited
+
+    lg.info('Editing articles...')
+    model = Model(EDITOR_MODEL, max_tokens=2000)
+    edited: list[dict] = []
+    for idx, article in enumerate(articles):
+        prompt = load_prompt('editor',
+                             title=article.get('title', ''),
+                             summary=article.get('summary', ''))
+        result = None
+        for attempt in range(5):
+            try:
+                result = model.prompt(prompt, response_format=EditedArticle, cached=False)
+                break
+            except Exception as e:
+                wait_time = 5 * (2 ** attempt)
+                lg.warning(f'Editor attempt {attempt + 1}/5 for article {idx} failed: {e}. '
+                           f'Retrying in {wait_time}s...')
+                time.sleep(wait_time)
+        if result is None:
+            raise RuntimeError(f'Editor failed for article {idx} after 5 attempts')
+
+        ea = EditedArticle(**result) if isinstance(result, dict) else result
+        edited.append({
+            **article,
+            'title': ea.title,
+            'summary': ea.summary.strip(),
+        })
+
+    with open(cache_file, 'w', encoding='utf-8') as f:
+        for art in edited:
+            f.write(json.dumps(art, ensure_ascii=False) + '\n')
+    return edited
 
 
 def generate_ai_image(articles: list[dict], schedule: str, cached: bool, article_index: int, max_retries: int = 5) -> Tuple[int, str]:

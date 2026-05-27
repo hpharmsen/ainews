@@ -4,6 +4,7 @@ from pathlib import Path
 
 from src.ai import (
     COPY_WRITE_MODEL_NAME,
+    EDITOR_MODEL_NAME,
     ART_MODEL_NAME,
     INFOGRAPHIC_MODEL_NAME,
 )
@@ -133,6 +134,7 @@ def build_html_email(schedule: str, items: list[dict], newsletter_title: str, in
                                 <b>Colofon</b><br>
                                 Nieuwsselectie: {COPY_WRITE_MODEL_NAME}<br>
                                 Teksten: {COPY_WRITE_MODEL_NAME}<br>
+                                Eindredactie: {EDITOR_MODEL_NAME}<br>
                                 Header graphic art direction én design: {ART_MODEL_NAME}<br>
                                 Infographic: {INFOGRAPHIC_MODEL_NAME}<br>
                                 Aansturen van alle AI: HP<br><br> 
