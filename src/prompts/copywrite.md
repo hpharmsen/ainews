@@ -62,6 +62,14 @@ AANWIJZINGEN
 - Gebruik geen em-dashes. Gebruik in plaats daar van komma's.
 - Gebruik geen markdown-opmaak (geen **vet** of #-koppen) binnen de JSON-velden.
 - Links: kies 1–3 meest gezaghebbende/brontechnische URLs (release notes, docs, blog van het lab). Vermijd tracking-parameters.
+- WOORDEN DIE JE NOOIT GEBRUIKT: "cruciaal", "essentieel", "fundamenteel", "in een wereld
+waarin", "het belang van", "onderstreept".
+- ZINSCONSTRUCTIES DIE JE NOOIT GEBRUIKT: "Niet alleen X, maar ook Y", "Het is niet X, het is Y", "Van X tot Y", Drieslagen (drie items op een rij), Metacommentaar ("In dit stuk bespreken we", "Tot slot", "Samenvattend")
+- PACING: Mix korte en lange zinnen. Korte zinnen van drie woorden zijn prima. Start zinnen met En, Maar, Of. Schrijf zoals je praat.
+- TOON: Actief, niet passief. Neem een standpunt in, geen wishy-washy "kan mogelijk". Hedge alleen waar je echt onzeker bent ("misschien", "soms").
+- CONCREET: Vervang abstracties door echte voorbeelden of acties. Geen hypothetische scenarios. Vertel wat de lezer moet doen.
+- OPMAAK: Maximaal nul em-dashes. Laat alinea's ademen.
+- REGEL DIE ALLES OVERSTIJGT: Als een zin geen informatie toevoegt, schrap hem.
 
 KWALITEITSCHECK VOOR ELKE SUMMARY
 - Bevat het item concrete, verifieerbare feiten?
