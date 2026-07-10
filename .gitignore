@@ -6050,3 +6050,4 @@ AttributeError: 'NoneType' object has no attribute 'save'
 2026-02-20 08:42:42 INFO ✓ Deleted email 177157310687.68225.6718453547735374333@harmsen.nl from [Gmail]/Sent Mail
 2026-02-20 08:42:45 INFO ✓ Deleted email 177157310878.68225.14255623615655821912@harmsen.nl from [Gmail]/Sent Mail
 2026-02-20 08:42:48 INFO ✓ Deleted email 177157311079.68225.9714449960597292782@harmsen.nl from [Gmail]/Sent Mail
+.worktrees
