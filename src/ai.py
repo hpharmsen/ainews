@@ -257,14 +257,18 @@ def generate_ai_image(articles: list[dict], schedule: str, cached: bool, article
 
     # Upload to S3
     s3 = S3('harmsen.nl')
-    for attempt in range(3):
+    s3_attempts = 5
+    for attempt in range(s3_attempts):
         try:
-            url = s3.add(out_path, 'nieuwsbrief/' + out_path.name)
+            url = s3.add(str(out_path), 'nieuwsbrief/' + out_path.name)
             return article_index, url
         except Exception as e:
-            lg.error(f'Error uploading to S3, retrying... (attempt {attempt + 1}/3)')
-            time.sleep(5 * (attempt + 1))
-    raise TimeoutError('Failed to upload image to S3 after 3 attempts')
+            wait_time = 5 * (2 ** attempt)
+            lg.error(f'S3 upload attempt {attempt + 1}/{s3_attempts} failed: '
+                     f'{type(e).__name__}: {e}. Retrying in {wait_time}s...')
+            if attempt < s3_attempts - 1:
+                time.sleep(wait_time)
+    raise TimeoutError(f'Failed to upload image to S3 after {s3_attempts} attempts')
 
 
 def extract_relevant_source_text(article: dict, source_text: str) -> str:
@@ -339,14 +343,18 @@ def generate_infographic(articles: list[dict], emails_dict: dict[str, str], sche
 
     # Upload to S3
     s3 = S3("harmsen.nl")
-    for attempt in range(3):
+    s3_attempts = 5
+    for attempt in range(s3_attempts):
         try:
-            url = s3.add(out_path, "nieuwsbrief/" + out_path.name)
+            url = s3.add(str(out_path), "nieuwsbrief/" + out_path.name)
             return article_index, url
         except Exception as e:
-            lg.error(f"Error uploading to S3, retrying... (attempt {attempt + 1}/3)")
-            time.sleep(5 * (attempt + 1))  # Exponential backoff for S3 upload
-    raise TimeoutError("Failed to upload infographic to S3 after 3 attempts")
+            wait_time = 5 * (2 ** attempt)
+            lg.error(f'S3 infographic upload attempt {attempt + 1}/{s3_attempts} failed: '
+                     f'{type(e).__name__}: {e}. Retrying in {wait_time}s...')
+            if attempt < s3_attempts - 1:
+                time.sleep(wait_time)
+    raise TimeoutError(f"Failed to upload infographic to S3 after {s3_attempts} attempts")
 
 
 def select_articles_for_visuals(articles: list[dict]) -> dict:
