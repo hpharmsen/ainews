@@ -131,6 +131,80 @@ def test_writes_cache_file():
     print('  PASS test_writes_cache_file')
 
 
+def test_retry_prompt_retries_connection_error():
+    """retry_prompt moet ConnectionException opvangen en opnieuw proberen."""
+    from justai.models.basemodel import ConnectionException
+    from src.ai import retry_prompt
+
+    mock_model = MagicMock()
+    mock_model.prompt.side_effect = [
+        ConnectionException('reset by peer'),
+        ConnectionException('reset by peer'),
+        {'image_index': 0, 'infographic_index': 1},
+    ]
+    with patch('src.ai.time.sleep'):
+        result = retry_prompt(mock_model, 'test prompt')
+
+    assert result == {'image_index': 0, 'infographic_index': 1}
+    assert mock_model.prompt.call_count == 3
+    print('  PASS test_retry_prompt_retries_connection_error')
+
+
+def test_retry_prompt_exhausts_and_reraises_connection_error():
+    """Na 5 mislukkingen moet retry_prompt de laatste ConnectionException re-raisen."""
+    from justai.models.basemodel import ConnectionException
+    from src.ai import retry_prompt
+
+    mock_model = MagicMock()
+    mock_model.prompt.side_effect = [ConnectionException(f'boom {i}') for i in range(5)]
+    with patch('src.ai.time.sleep'):
+        try:
+            retry_prompt(mock_model, 'test prompt')
+            raise AssertionError('expected ConnectionException, got no exception')
+        except ConnectionException as e:
+            assert 'boom 4' in str(e), f'expected last exception (boom 4), got: {e}'
+
+    assert mock_model.prompt.call_count == 5
+    print('  PASS test_retry_prompt_exhausts_and_reraises_connection_error')
+
+
+def test_retry_prompt_still_retries_ratelimit():
+    """Regressie: RatelimitException blijft ook opgevangen worden."""
+    from justai.models.basemodel import RatelimitException
+    from src.ai import retry_prompt
+
+    mock_model = MagicMock()
+    mock_model.prompt.side_effect = [
+        RatelimitException('rate limit'),
+        {'ok': True},
+    ]
+    with patch('src.ai.time.sleep'):
+        result = retry_prompt(mock_model, 'test prompt')
+
+    assert result == {'ok': True}
+    assert mock_model.prompt.call_count == 2
+    print('  PASS test_retry_prompt_still_retries_ratelimit')
+
+
+def test_retry_prompt_uses_exponential_backoff():
+    """Sleep-waardes moeten oplopen: 5, 10, 20, 40, ... (max 60)."""
+    from justai.models.basemodel import ConnectionException
+    from src.ai import retry_prompt
+
+    mock_model = MagicMock()
+    mock_model.prompt.side_effect = [ConnectionException('boom') for _ in range(5)]
+    with patch('src.ai.time.sleep') as mock_sleep:
+        try:
+            retry_prompt(mock_model, 'test prompt')
+        except ConnectionException:
+            pass
+
+    # 4 sleeps na 4 mislukkingen (na de 5e failure geen sleep meer, direct re-raise).
+    sleeps = [call.args[0] for call in mock_sleep.call_args_list]
+    assert sleeps == [5, 10, 20, 40], f'expected [5, 10, 20, 40], got {sleeps}'
+    print('  PASS test_retry_prompt_uses_exponential_backoff')
+
+
 def main():
     os.environ.setdefault('DATABASE_URL', 'postgresql://test/test')
     tests = [
@@ -138,6 +212,10 @@ def main():
         test_preserves_links_and_sources,
         test_handles_dict_response,
         test_writes_cache_file,
+        test_retry_prompt_retries_connection_error,
+        test_retry_prompt_exhausts_and_reraises_connection_error,
+        test_retry_prompt_still_retries_ratelimit,
+        test_retry_prompt_uses_exponential_backoff,
     ]
     failed = 0
     for t in tests:

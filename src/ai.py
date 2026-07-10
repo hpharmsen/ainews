@@ -6,7 +6,7 @@ from typing import Tuple
 
 import httpx
 from justai import Model
-from justai.models.basemodel import ModelOverloadException, RatelimitException
+from justai.models.basemodel import ConnectionException, ModelOverloadException, RatelimitException
 from justdays import Day
 from pydantic import BaseModel, Field, HttpUrl
 from typing import Annotated
@@ -369,12 +369,14 @@ def select_articles_for_visuals(articles: list[dict]) -> dict:
 
 
 def retry_prompt(model, prompt) -> dict:
-    for attempt in range(5):
+    attempts = 5
+    for attempt in range(attempts):
         try:
-            res = model.prompt(prompt, return_json=True, cached=False)
-            return res
-        except (RatelimitException, ModelOverloadException):
-            lg.warning('Hitting rate limit or timeout, retrying...')
-            time.sleep(5)
-    else:
-        raise RatelimitException
+            return model.prompt(prompt, return_json=True, cached=False)
+        except (RatelimitException, ModelOverloadException, ConnectionException) as e:
+            if attempt == attempts - 1:
+                raise
+            wait = min(5 * 2 ** attempt, 60)
+            lg.warning(f'{type(e).__name__}: {e}. Retrying in {wait}s '
+                       f'(attempt {attempt + 1}/{attempts})...')
+            time.sleep(wait)
