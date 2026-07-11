@@ -141,6 +141,15 @@ def generate_ai_summary(schedule: str, text: str, verbose=False, cached=True):
 
     summary = Summary(**result) if isinstance(result, dict) else result
 
+    # Filter out "skip" items the LLM may produce despite prompt instructions
+    skip_phrases = ('wordt overgeslagen', 'wordt daarom overgeslagen')
+    filtered = [a for a in summary.articles
+                if not any(p in a.summary.lower() for p in skip_phrases)]
+    dropped = len(summary.articles) - len(filtered)
+    if dropped:
+        lg.info(f'Dropped {dropped} skip-marker item(s) from summary')
+    summary.articles = filtered
+
     # Check the urls by opening them and see if they return a proper web page
     lg.info('Checking links ...')
     for article in summary.articles:

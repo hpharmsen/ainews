@@ -25,6 +25,11 @@ INPUT
 {latest_newsletters}
 </laatste_nieuwsbrieven>
 
+BELANGRIJK OVER OVERGESLAGEN ITEMS
+- Als een item al in <laatste_nieuwsbrieven> stond, laat het VOLLEDIG weg uit je output.
+- Voeg GEEN item toe met een samenvatting als "Dit item stond al in ..." of "wordt overgeslagen". Zulke meta-notities horen niet in de nieuwsbrief.
+- Alleen als er substantieel nieuws is bovenop een eerder item (een concrete update, nieuwe cijfers, nieuwe feiten), mag je een nieuw item opnemen dat expliciet op die update focust, niet op het oude nieuws.
+
 SELECTIE- EN RANGSCHIKKINGSCriteria
 - Sorteer op belangrijkheid voor professionals die AI toepassen:
   1) Artikelen die direct actionable zijn voor mensen die AI willen inzetten in hun organisatie
