@@ -133,6 +133,10 @@ if __name__ == '__main__':
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
     load_dotenv(override=True)
     lg.setup_logging('data/app.log')
+    if os.getenv('JANITOR_ERRORS') == '1':
+        import logging
+        from justlog.handlers import JanitorWebhookHandler
+        logging.getLogger('app').addHandler(JanitorWebhookHandler(project='ainews'))
     try:
         main()
     except Exception as e:
