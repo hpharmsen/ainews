@@ -33,9 +33,9 @@ This is an AI-powered newsletter generation system that:
 
 ## Commands
 
-- **Run newsletter**: `python main.py daily` or `python main.py weekly`
-- **Use cached data**: `python main.py daily --cached` (skips email fetching)
-- **Install dependencies**: `pip install -r requirements.txt`
+- **Run newsletter**: `uv run main.py daily` or `uv run main.py weekly`
+- **Use cached data**: `uv run main.py daily --cached` (skips email fetching)
+- **Install dependencies**: `uv sync`
 
 ## Configuration
 
