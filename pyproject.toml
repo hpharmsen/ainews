@@ -1,0 +1,15 @@
+[project]
+name = 'ainews'
+version = '0.1.0'
+description = 'AI-powered newsletter generation system'
+requires-python = '>=3.13'
+dependencies = [
+    'python-dotenv',
+    'justai>=5.5.0',
+    'justdays',
+    'justlog @ git+https://github.com/hpharmsen/justlog.git@0.8.3',
+    'sqlalchemy',
+    'psycopg2-binary',
+    'boto3',
+    'httpx',
+]
