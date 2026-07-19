@@ -13,7 +13,7 @@ from typing import Annotated
 
 from src.database import get_last_newsletter_summaries, cache_file_prefix
 from src.s3 import S3
-from src.log import lg
+from justlog import lg
 
 COPY_WRITE_MODEL = 'claude-sonnet-4-6'
 COPY_WRITE_MODEL_NAME = 'Claude Sonnet 4.6'

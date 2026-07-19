@@ -10,7 +10,7 @@ from email.header import decode_header
 from pathlib import Path
 
 from src.database import cache_file_prefix
-from src.log import lg
+from justlog import lg
 
 FILTER_ON_LABEL='y_ai_news'
 # SELECTED_SENDERS = [

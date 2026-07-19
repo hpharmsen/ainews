@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 from justdays import Day
 
 from src.gmail import Mail
-from src.log import lg
+from justlog import lg
 from src.mailer import delete_email
 from src.subscribers import update_subscription, get_subscriber_status
 

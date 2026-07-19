@@ -6,6 +6,9 @@ requires-python = ">=3.13"
 exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for backwards compatibility when using relative exclude-newer values.
 exclude-newer-span = "P7D"
 
+[options.exclude-newer-package]
+justai = "2026-12-31T23:00:00Z"
+
 [[package]]
 name = "absl-py"
 version = "2.5.0"
@@ -36,7 +39,7 @@ requires-dist = [
     { name = "httpx" },
     { name = "justai", specifier = ">=5.5.0" },
     { name = "justdays" },
-    { name = "justlog", git = "https://github.com/hpharmsen/justlog.git?rev=0.8.3" },
+    { name = "justlog", git = "https://github.com/hpharmsen/justlog.git?rev=0.8.5" },
     { name = "psycopg2-binary" },
     { name = "python-dotenv" },
     { name = "sqlalchemy" },
@@ -749,7 +752,7 @@ wheels = [
 
 [[package]]
 name = "justai"
-version = "5.5.7"
+version = "5.6.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "absl-py" },
@@ -768,9 +771,9 @@ dependencies = [
     { name = "rich" },
     { name = "tiktoken" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f4/26/3a2803b22da43c88a8b96722a42c2717a82ead24f8fdd86a2010cd81e9bc/justai-5.5.7.tar.gz", hash = "sha256:1199e504da88a8a107ed94e43492d78db17c1cb82c5c8c1faed4f8648d30459e", size = 272713, upload-time = "2026-05-27T18:21:11.494Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/04/aa/7d6218f235b3dcb6788a6d5760d1ab137c0712508273430800456b8e6993/justai-5.6.3.tar.gz", hash = "sha256:066cb885872b47bfcb2f561c6d6a1a4a8129c539bebedbe70d7c29ac3319707b", size = 283901, upload-time = "2026-07-16T16:03:02.358Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/86/34/9e66db3c3e156c842670c10ee5e81b0f2e75405983b3f4974af3e0b56e00/justai-5.5.7-py3-none-any.whl", hash = "sha256:a194d799d5dcabb3e36242131965defb283464bfb1f550b9b53a5bb80b1f7eb6", size = 58773, upload-time = "2026-05-27T18:21:09.907Z" },
+    { url = "https://files.pythonhosted.org/packages/92/96/c8312aa1a83a6eeabe702d045988720554cd9fd40e7ed7877fd4d5331823/justai-5.6.3-py3-none-any.whl", hash = "sha256:c5e62484c2f0177c79d6ebd31065e7ecbcb9234f0a58e2cfc557629fd592c26e", size = 64970, upload-time = "2026-07-16T16:03:00.608Z" },
 ]
 
 [[package]]
@@ -787,8 +790,8 @@ wheels = [
 
 [[package]]
 name = "justlog"
-version = "0.8.3"
-source = { git = "https://github.com/hpharmsen/justlog.git?rev=0.8.3#7f6f793c29752b72a7b3bcde7255e079605f7668" }
+version = "0.8.5"
+source = { git = "https://github.com/hpharmsen/justlog.git?rev=0.8.5#000fd850a7b08be216a45b5afb409a9ac3bdb3c5" }
 
 [[package]]
 name = "lxml"

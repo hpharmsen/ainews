@@ -13,7 +13,7 @@ from justdays import Day
 
 from src.subscribers import get_subscribers
 from src.gmail import Mail
-from src.log import lg
+from justlog import lg
 
 REPLY_TO_EMAIL = "nieuwsbrief@harmsen.nl"
 DISPLAY_FROM_EMAIL = "nieuwsbrief@harmsen.nl"

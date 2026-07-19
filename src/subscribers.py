@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from sqlalchemy import create_engine, MetaData, select, update
 from dotenv import load_dotenv
 
-from src.log import lg
+from justlog import lg
 
 
 @contextmanager

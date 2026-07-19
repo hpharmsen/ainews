@@ -9,7 +9,7 @@ from src.ai import (
     INFOGRAPHIC_MODEL_NAME,
 )
 from src.database import cache_file_prefix
-from src.log import lg
+from justlog import lg
 
 
 def build_html_email(schedule: str, items: list[dict], newsletter_title: str, intro_text: str, image_url: str, infographic_url: str | None = None, infographic_article_index: int | None = None) -> str:

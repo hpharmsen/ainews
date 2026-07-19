@@ -10,7 +10,7 @@ from justdays import Day
 
 from src.ai import generate_ai_summary, edit_articles, generate_ai_image, generate_infographic, select_articles_for_visuals
 from src.formatter import create_html_email
-from src.log import lg
+from justlog import lg, setup_logging
 from src.mailer import send_newsletter, already_sent_today
 from src.undelivered import handle_undelivered
 
@@ -115,32 +115,16 @@ def main():
     handle_undelivered()
 
 
-def notify_error(error: Exception):
-    """Send error notification email via harmsen.nl/emailme service."""
-    import requests
-    import traceback
-    body = f'<pre>{traceback.format_exc()}</pre>'
-    try:
-        requests.post('https://www.harmsen.nl/emailme/', json={
-            'subject': f'AI Newsletter error: {error}',
-            'body': body,
-        })
-    except Exception:
-        lg.error(f'Failed to send error notification: {error}')
-
-
 if __name__ == '__main__':
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
     load_dotenv(override=True)
-    lg.setup_logging('data/app.log')
+    setup_logging('data/app.log')
     if os.getenv('JANITOR_ERRORS') == '1':
-        import logging
         from justlog.handlers import JanitorWebhookHandler
-        logging.getLogger('app').addHandler(JanitorWebhookHandler(project='ainews'))
+        lg.addHandler(JanitorWebhookHandler(project='ainews'))
     try:
         main()
     except Exception as e:
-        lg.critical(f'uncaught exception, application will terminate.\n{e}')
-        notify_error(e)
+        lg.critical(f'uncaught exception, application will terminate.\n{e}', exc_info=True)
         raise
 

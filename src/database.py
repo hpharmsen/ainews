@@ -9,7 +9,7 @@ from sqlalchemy import create_engine, MetaData, text, select, desc, func, and_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from justdays import Day
 
-from src.log import lg
+from justlog import lg
 
 
 def normalize_db_url(db_url):
