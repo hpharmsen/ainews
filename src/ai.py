@@ -291,7 +291,7 @@ def extract_relevant_source_text(article: dict, source_text: str) -> str:
     return model.prompt(prompt, return_json=False, cached=False)
 
 
-def generate_infographic(articles: list[dict], emails_dict: dict[str, str], schedule: str, cached: bool, visual_selection: dict, max_retries: int = 5) -> Tuple[int, str]:
+def generate_infographic(articles: list[dict], emails_dict: dict[str, str], schedule: str, cached: bool, visual_selection: dict, max_retries: int = 5) -> Tuple[int | None, str | None]:
     out_path = Path(cache_file_prefix(schedule) + "_infographic.png")
 
     if cached and os.path.isfile(out_path):
@@ -320,6 +320,7 @@ def generate_infographic(articles: list[dict], emails_dict: dict[str, str], sche
     if not (cached and os.path.isfile(out_path)):
         lg.info("Generating infographic...")
         model = Model(INFOGRAPHIC_MODEL)
+        generated = False
         # Retry logic with exponential backoff
         for attempt in range(max_retries):
             try:
@@ -331,14 +332,13 @@ def generate_infographic(articles: list[dict], emails_dict: dict[str, str], sche
                     raise ValueError('Image generation returned None')
                 img.save(out_path, format="PNG")
                 lg.info("Image generated successfully")
+                generated = True
                 break
 
             except (httpx.ReadTimeout, TimeoutError) as e:
                 if attempt == max_retries - 1:  # Last attempt
-                    lg.error(f"Failed to generate infographic after {max_retries} attempts")
-                    raise Exception(
-                        f"Infographic generation timed out after {max_retries} attempts"
-                    ) from e
+                    lg.error(f"Failed to generate infographic after {max_retries} attempts: {e}")
+                    break
 
                 lg.warning(f"Timeout occurred, retrying...")
                 time.sleep(min(30 * 2 ** attempt, 300))
@@ -346,9 +346,12 @@ def generate_infographic(articles: list[dict], emails_dict: dict[str, str], sche
             except Exception as e:
                 if attempt == max_retries - 1:  # Last attempt
                     lg.error(f"Failed to generate infographic: {str(e)}")
-                    raise
+                    break
                 lg.error(f"Error generating infographic: {str(e)}. Retrying...")
                 time.sleep(min(30 * 2 ** attempt, 300))
+
+        if not generated:
+            return None, None
 
     # Upload to S3
     s3 = S3("harmsen.nl")
