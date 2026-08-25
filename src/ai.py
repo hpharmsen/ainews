@@ -28,6 +28,8 @@ EDITOR_MODEL_NAME = 'Claude Opus 4.7'
 PROMPTS_DIR = Path(__file__).parent / 'prompts'
 COLORS = ['rood', 'groen', 'grijs', 'bruin', 'oranje', 'paars', 'blauw']
 
+MIN_ARTICLES = 3
+
 def load_prompt(name: str, **kwargs) -> str:
     """Load a prompt template from the prompts folder and substitute variables."""
     text = (PROMPTS_DIR / f'{name}.md').read_text()
@@ -60,6 +62,24 @@ class Summary(BaseModel):
 class EditedArticle(BaseModel):
     title: str = Field(description="Verbeterde of onveranderde titel")
     summary: str = Field(description="Verbeterde of onveranderde samenvatting")
+
+
+def check_publishable(articles: list[dict]) -> str | None:
+    """Geeft de reden terug waarom deze nieuwsbrief niet verstuurd mag worden, of None.
+
+    Op de telling, niet op formulering: een lijst met verboden zinnen dekt alleen de
+    fout van gisteren. Als het model geen nieuws vindt klapt het aantal items in.
+
+    Bewust NIET op bronlinks: check_and_resolve_url() strijkt zoveel links weg dat
+    echte nieuwsbrieven regelmatig op nul of een uitkomen. Over de 15 bewaarde
+    nieuwsbrieven zou een linkcriterium 18 en 22 augustus onterecht hebben tegengehouden.
+    """
+    if len(articles) < MIN_ARTICLES:
+        return f'{len(articles)} artikelen, minimaal {MIN_ARTICLES} nodig'
+    empty = [a.get('title', '?') for a in articles if not a.get('summary', '').strip()]
+    if empty:
+        return f'lege samenvatting bij: {", ".join(empty)}'
+    return None
 
 
 _BROWSER_HEADERS = {

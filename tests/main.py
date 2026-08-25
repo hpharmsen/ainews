@@ -257,12 +257,14 @@ def test_publishable_rejects_too_few_articles():
     print('  PASS test_publishable_rejects_too_few_articles')
 
 
-def test_publishable_rejects_too_few_links():
-    """Vier artikelen waarvan er maar één een bronlink heeft, wordt afgekeurd."""
+def test_publishable_accepts_newsletter_without_links():
+    """Regressie op 18 en 22 augustus: check_and_resolve_url() strijkt zoveel links weg
+    dat een echte nieuwsbrief er maar een overhoudt. Die mag niet worden afgekeurd."""
     from src.ai import check_publishable
 
-    assert check_publishable(_articles(4, with_links=1)) is not None
-    print('  PASS test_publishable_rejects_too_few_links')
+    reason = check_publishable(_articles(6, with_links=1))
+    assert reason is None, f'echte nieuwsbrief zonder links onterecht afgekeurd: {reason}'
+    print('  PASS test_publishable_accepts_newsletter_without_links')
 
 
 def test_publishable_rejects_empty_summary():
@@ -433,7 +435,7 @@ def main():
         test_publishable_rejects_incident_2026_08_25,
         test_publishable_accepts_normal_newsletter,
         test_publishable_rejects_too_few_articles,
-        test_publishable_rejects_too_few_links,
+        test_publishable_accepts_newsletter_without_links,
         test_publishable_rejects_empty_summary,
         test_lookback_floor_when_last_send_was_recent,
         test_lookback_uses_last_sent_when_older_than_floor,

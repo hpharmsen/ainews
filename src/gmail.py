@@ -13,6 +13,12 @@ from src.database import cache_file_prefix
 from justlog import lg
 
 FILTER_ON_LABEL='y_ai_news'
+LAST_SENT_FILE = Path(__file__).parent.parent / 'data' / 'last_sent.json'
+# Ondergrens voor het ophaalvenster. Zonder deze klem verkleint een late vorige run
+# het venster van de volgende, en dan blijft er te weinig nieuws over.
+MIN_LOOKBACK = {'daily': timedelta(days=1), 'weekly': timedelta(weeks=1)}
+MAX_LEN_PER_MAIL = 2000
+MAX_TOTAL_LEN = 10_000
 # SELECTED_SENDERS = [
 # 'aitidbits+ai-coding@substack.com',
 # 'aiminds@mail.beehiiv.com'
@@ -372,6 +378,19 @@ class Mail:
                 pass
 
 
+def fetch_window_start(schedule: str) -> datetime:
+    """Begin van het ophaalvenster: last_sent, maar altijd minstens MIN_LOOKBACK terug."""
+    floor = datetime.now(timezone.utc) - MIN_LOOKBACK[schedule]
+    try:
+        with open(LAST_SENT_FILE, 'r') as f:
+            from_date = datetime.fromisoformat(json.load(f)['last_sent'][schedule])
+    except (FileNotFoundError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return floor
+    if from_date.tzinfo is None:
+        from_date = from_date.replace(tzinfo=timezone.utc)
+    return min(from_date, floor)
+
+
 def get_raw_mail_text(schedule: str, cached: bool=False, verbose: bool=False):
     cache_file = Path(cache_file_prefix(schedule) + '_emails.txt')
 
@@ -392,41 +411,34 @@ def get_raw_mail_text(schedule: str, cached: bool=False, verbose: bool=False):
     if not email_ids:
         return
 
-    # Read last sent date from last_sent.json
-    last_sent_file = Path(__file__).parent.parent / 'data' / 'last_sent.json'
-    try:
-        with open(last_sent_file, 'r') as f:
-            last_sent_data = json.load(f)
-        from_date = datetime.fromisoformat(last_sent_data['last_sent'][schedule])
-        if from_date.tzinfo is None:
-            from_date = from_date.replace(tzinfo=timezone.utc)
-    except (FileNotFoundError, KeyError, json.JSONDecodeError) as e:
-        # Fallback to default date if file doesn't exist or is invalid
-        from_date = datetime.now(timezone.utc) - timedelta(weeks=1) if schedule == 'weekly' else datetime.now(timezone.utc) - timedelta(days=1)
+    from_date = fetch_window_start(schedule)
 
-    text = ""
-    max_len_per_mail = 2000
+    candidates = []
     for email_id in email_ids:
         details = mail.get_email_details(email_id)
-        if not details:
+        if not details or not details.get('date'):
             continue
-        if details.get('date'):
-            email_date = details['date']
-            # Make sure email_date is timezone-aware
-            if email_date.tzinfo is None:
-                email_date = email_date.replace(tzinfo=timezone.utc)
-            if email_date >= from_date:
-                sender_name = decode_email_header(details['sender_name'])
-                subject = decode_email_header(details['subject'])
-                body = str(mail.get_email_body(email_id))[:max_len_per_mail]
-                email_text = ' ==================================================\n' + \
-                f"Source: {sender_name} {details['sender_email']}\n" + \
-                f"Date: {details['date']}\n" + \
-                f"Subject: {subject}\n" + \
-                body + "\n\n"
-                if len(text + email_text) > 10_000:
-                    break
-                text += email_text
+        email_date = details['date']
+        # Make sure email_date is timezone-aware
+        if email_date.tzinfo is None:
+            email_date = email_date.replace(tzinfo=timezone.utc)
+        if email_date >= from_date:
+            candidates.append((email_date, email_id, details))
+
+    # Nieuwste eerst: bij een breder venster mag de cap niet het verse nieuws afkappen.
+    text = ""
+    for _, email_id, details in sorted(candidates, key=lambda c: c[0], reverse=True):
+        sender_name = decode_email_header(details['sender_name'])
+        subject = decode_email_header(details['subject'])
+        body = str(mail.get_email_body(email_id))[:MAX_LEN_PER_MAIL]
+        email_text = ' ==================================================\n' + \
+        f"Source: {sender_name} {details['sender_email']}\n" + \
+        f"Date: {details['date']}\n" + \
+        f"Subject: {subject}\n" + \
+        body + "\n\n"
+        if len(text + email_text) > MAX_TOTAL_LEN:
+            break
+        text += email_text
 
     if text:
         with open(cache_file, 'w', encoding='utf-8') as f:

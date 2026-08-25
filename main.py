@@ -8,14 +8,15 @@ from src.database import add_to_database, cleanup_cache
 from src.gmail import get_raw_mail_text, parse_emails_to_dict
 from justdays import Day
 
-from src.ai import generate_ai_summary, edit_articles, generate_ai_image, generate_infographic, select_articles_for_visuals
+from src.ai import generate_ai_summary, edit_articles, generate_ai_image, generate_infographic, select_articles_for_visuals, check_publishable
 from src.formatter import create_html_email
 from justlog import lg, setup_logging
 from src.mailer import send_newsletter, already_sent_today
 from src.undelivered import handle_undelivered
 
 VERBOSE = True
-MONTHS = ["januari", "februari", "maart", "april", "mei", "juni", "juli", "augustus", "september", "oktober", "november", "december"]
+MIN_SOURCE_EMAILS = 2  # minder bronmails betekent geen nieuwsbrief, maar een melding
+MONTHS =["januari", "februari", "maart", "april", "mei", "juni", "juli", "augustus", "september", "oktober", "november", "december"]
 
 def parse_command_line():
     args = sys.argv[1:]
@@ -70,13 +71,18 @@ def main():
         return
 
     text = get_raw_mail_text(schedule, cached=cached, verbose=VERBOSE)
-    if not text or not text.strip():
-        lg.warning(f"No emails found for '{schedule}'. Aborting to prevent empty newsletter.")
+    emails_dict = parse_emails_to_dict(text or '')
+    if len(emails_dict) < MIN_SOURCE_EMAILS:
+        lg.error(f"Te weinig bronmails voor '{schedule}': {len(emails_dict)} "
+                 f"(minimaal {MIN_SOURCE_EMAILS}). Nieuwsbrief niet verstuurd.")
         return
 
-    emails_dict = parse_emails_to_dict(text)
     articles = generate_ai_summary(schedule, text, cached=cached, verbose=VERBOSE)
     articles = edit_articles(schedule, articles, cached=cached, verbose=VERBOSE)
+
+    if reason := check_publishable(articles):
+        lg.error(f"Nieuwsbrief '{schedule}' afgekeurd: {reason}. Niet verstuurd.")
+        return
 
     # Select articles for both visuals in one prompt
     lg.info('Selecting articles for visuals...')

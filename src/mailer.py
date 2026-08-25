@@ -7,7 +7,6 @@ from pathlib import Path
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.utils import formataddr, make_msgid
-from contextlib import contextmanager
 
 from justdays import Day
 
@@ -19,34 +18,30 @@ REPLY_TO_EMAIL = "nieuwsbrief@harmsen.nl"
 DISPLAY_FROM_EMAIL = "nieuwsbrief@harmsen.nl"
 
 
-@contextmanager
-def logged_in_smtp():
-    """Context manager for SMTP connection with login. """
+def connect_smtp() -> smtplib.SMTP:
+    """Opent een SMTP-verbinding met login."""
+    smtp_server = os.getenv('EMAIL_HOST')
+    smtp_port = int(os.getenv('EMAIL_PORT', '587'))
+    username = os.getenv('EMAIL_HOST_USER')
+    password = os.getenv('EMAIL_HOST_PASSWORD')
 
-    server = None
+    if not all([smtp_server, username, password]):
+        raise ValueError("Missing required SMTP configuration in environment variables")
+
+    server = smtplib.SMTP(smtp_server, smtp_port)
+    server.starttls()
+    server.login(username, password)
+    return server
+
+
+def quit_smtp(server) -> None:
+    """Sluit een verbinding. Een verbinding die niet netjes dichtgaat is geen incident."""
+    if not server:
+        return
     try:
-        # Get SMTP settings from environment
-        smtp_server = os.getenv('EMAIL_HOST')
-        smtp_port = int(os.getenv('EMAIL_PORT', '587'))
-        username = os.getenv('EMAIL_HOST_USER')
-        password = os.getenv('EMAIL_HOST_PASSWORD')
-        
-        if not all([smtp_server, username, password]):
-            raise ValueError("Missing required SMTP configuration in environment variables")
-        
-        server = smtplib.SMTP(smtp_server, smtp_port)
-        server.starttls()
-        server.login(username, password)
-        yield server
+        server.quit()
     except Exception as e:
-        lg.error(f"SMTP Error: {e}")
-        raise
-    finally:
-        if server:
-            try:
-                server.quit()
-            except Exception as e:
-                lg.error(f"Error closing SMTP connection: {e}")
+        lg.warning(f"Error closing SMTP connection: {e}")
 
 
 def create_message(recipient: str, subject: str, html_content: str, reply_to: str) -> MIMEMultipart:
@@ -172,10 +167,15 @@ def send_newsletter(schedule: str, newsletter_html: str, title: str):
 
     # Collect Message-IDs for deletion after sending
     message_ids_to_delete = []
+    sent, failed = [], []
+    server = None
 
-    with logged_in_smtp() as server:
-        for i, recipient in enumerate(subscribers, 1):
+    for i, recipient in enumerate(subscribers, 1):
+        for attempt in range(2):
             try:
+                if server is None:
+                    server = connect_smtp()
+
                 # Personalize the HTML content
                 html = newsletter_html.replace("[EMAIL]", recipient)
 
@@ -193,6 +193,7 @@ def send_newsletter(schedule: str, newsletter_html: str, title: str):
                 # Send the email
                 server.sendmail(DISPLAY_FROM_EMAIL, [recipient], msg.as_string())
                 lg.info(f"Email sent to {recipient}")
+                sent.append(recipient)
 
                 # Collect Message-ID for later deletion (if not @harmsen.nl)
                 if '@harmsen.nl' not in recipient.lower():
@@ -200,16 +201,25 @@ def send_newsletter(schedule: str, newsletter_html: str, title: str):
 
                 # Log successful send
                 mailerlog(f"{schedule} {Day()} {recipient}")
+                break
 
-                # Rate limiting
-                if i % BATCH_SIZE == 0 and i < len(subscribers):
-                    lg.info(f"Sent {i} emails, pausing for 60 seconds...")
-                    time.sleep(60)
+            except (smtplib.SMTPException, OSError) as e:
+                quit_smtp(server)
+                server = None  # forceer een verse verbinding bij de retry
+                if attempt == 0:
+                    lg.warning(f"SMTP-fout bij {recipient}: {e}. Opnieuw verbinden...")
                 else:
-                    time.sleep(1)  # Small delay between emails
+                    lg.error(f"Verzending naar {recipient} definitief mislukt: {e}")
+                    failed.append(recipient)
 
-            except Exception as e:
-                lg.error(f"Error sending to {recipient}: {str(e)}")
+        # Rate limiting
+        if i % BATCH_SIZE == 0 and i < len(subscribers):
+            lg.info(f"Sent {i} emails, pausing for 60 seconds...")
+            time.sleep(60)
+        else:
+            time.sleep(1)  # Small delay between emails
+
+    quit_smtp(server)
 
     # Delete sent emails after a delay to allow Gmail to process them
     if message_ids_to_delete:
@@ -224,6 +234,10 @@ def send_newsletter(schedule: str, newsletter_html: str, title: str):
 
         lg.info(f"Successfully deleted {deleted_count}/{len(message_ids_to_delete)} sent emails")
 
-    lg.info(f"Newsletter sending completed. Sent to {len(subscribers)} recipients.\n")
+    lg.info(f"Newsletter sending completed. Sent to {len(sent)} of {len(subscribers)} recipients.\n")
+    if failed:
+        lg.error(f"Nieuwsbrief '{schedule}' niet bezorgd bij {len(failed)} van "
+                 f"{len(subscribers)} abonnees: {', '.join(failed)}. "
+                 f"Draai `python main.py {schedule} --resend` om alleen deze te herstellen.")
     mailerlog()
     update_last_sent_timestamp(schedule)
