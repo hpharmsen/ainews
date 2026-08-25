@@ -127,15 +127,11 @@ Nieuwe functie, direct onder de Pydantic-modellen:
 ```python
 # src/ai.py
 MIN_ARTICLES = 3
-MIN_ARTICLES_WITH_LINK = 2
 
 def check_publishable(articles: list[dict]) -> str | None:
     """Geeft een reden terug waarom de nieuwsbrief niet verstuurd mag worden, of None."""
     if len(articles) < MIN_ARTICLES:
         return f'{len(articles)} artikelen, minimaal {MIN_ARTICLES} nodig'
-    with_link = sum(1 for a in articles if a.get('links'))
-    if with_link < MIN_ARTICLES_WITH_LINK:
-        return f'{with_link} artikelen met bronlink, minimaal {MIN_ARTICLES_WITH_LINK} nodig'
     empty = [a.get('title', '?') for a in articles if not a.get('summary', '').strip()]
     if empty:
         return f'lege samenvatting bij: {", ".join(empty)}'
@@ -150,7 +146,9 @@ if reason := check_publishable(articles):
     return
 ```
 
-Waarom structureel en niet op formulering: het meta-artikel van 25 augustus had `links: []` en stond alleen. Beide criteria vielen om. Een volgende variant zal anders geformuleerd zijn maar dezelfde structuur hebben, want een model dat geen nieuws vindt kan ook geen bronlink opgeven.
+Waarom op de telling en niet op formulering: het meta-artikel van 25 augustus stond alleen. Een volgende variant zal anders geformuleerd zijn maar dezelfde vorm hebben, want een model dat geen nieuws vindt levert geen zes items op. Een lijst met verboden zinnen dekt alleen de fout van gisteren.
+
+**Geen criterium op bronlinks.** Een eis van minimaal twee artikelen met een geldige link keurt, gemeten tegen de 15 bewaarde nieuwsbrieven in `cache/*_edited.jsonl`, 18 en 22 augustus onterecht af. `check_and_resolve_url()` strijkt zoveel links weg dat echte artikelen over AT&T, Nvidia en Goldman Sachs met nul links overblijven. De telling alleen scheidt wel schoon: 14 echte nieuwsbrieven erdoor, alleen 25 augustus tegengehouden.
 
 `MIN_ARTICLES = 3` is een bewuste keuze van HP. De copywrite-prompt vraagt om minimaal 4 items, dus dit geeft één item speling voor een dunne zaterdag zonder dat een echte leegte erdoorheen glipt.
 
@@ -233,8 +231,8 @@ De foutmelding noemt de herstelactie expliciet, want die is niet vanzelfsprekend
 - [ ] Bij een breder venster komen de nieuwste mails in de 10.000-tekens-selectie, niet de oudste
 - [ ] Bij minder dan 2 bronmails: `lg.error` en geen enkele LLM-aanroep
 - [ ] Bij minder dan 3 artikelen: `lg.error` en geen verzending
-- [ ] Bij minder dan 2 artikelen met een bronlink: `lg.error` en geen verzending
 - [ ] Bij een lege samenvatting in enig artikel: `lg.error` en geen verzending
+- [ ] Geen valse afkeuring: alle 14 bewaarde echte nieuwsbrieven komen er wel doorheen
 - [ ] Elk pad dat de nieuwsbrief laat vervallen logt op ERROR, niet op WARNING
 - [ ] Afgekeurde nieuwsbrieven komen niet in de database en werken `last_sent.json` niet bij
 - [ ] Regressietest: de exacte artikellijst uit `cache/2026-08-25_summary.jsonl` wordt afgekeurd
@@ -264,8 +262,9 @@ def test_publishable_rejects_incident_2026_08_25():
 def test_publishable_accepts_normal_newsletter():
     """Een normale set van 4 artikelen met links komt erdoor."""
 
-def test_publishable_rejects_too_few_links():
-    """4 artikelen waarvan er 3 geen enkele link hebben, wordt afgekeurd."""
+def test_publishable_accepts_newsletter_without_links():
+    """Regressie op 18 en 22 augustus: 6 echte artikelen waarvan er maar een
+    een link overhoudt, mag niet worden afgekeurd."""
 
 def test_publishable_rejects_empty_summary():
     """Artikel met een lege of whitespace-only summary wordt afgekeurd."""

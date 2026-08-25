@@ -205,6 +205,222 @@ def test_retry_prompt_uses_exponential_backoff():
     print('  PASS test_retry_prompt_uses_exponential_backoff')
 
 
+# ---------------------------------------------------------------------------
+# Kwaliteitspoort: nooit een nieuwsbrief zonder nieuws versturen
+# ---------------------------------------------------------------------------
+
+# De letterlijke payload die op 2026-08-25 naar 56 abonnees ging.
+INCIDENT_2026_08_25 = [{
+    'title': 'Geen bruikbaar nieuws beschikbaar',
+    'summary': 'De ontvangen e-mail van AI Central bevat geen concrete, verifieerbare '
+               'nieuwsfeiten die geschikt zijn voor de nieuwsbrief. De mail beschrijft een '
+               'algemene tip over het analyseren van PDF-rapporten met AI, maar noemt geen '
+               'specifieke tools, cijfers, datums of productlanceringen.',
+    'links': [],
+    'sources': ['AI Central, Kris'],
+}]
+
+
+def _articles(count: int, with_links: int = 99) -> list[dict]:
+    """Bouw `count` artikelen, waarvan de eerste `with_links` een bronlink hebben."""
+    return [{
+        'title': f'Artikel {i}',
+        'summary': f'Samenvatting van artikel {i}. Met een tweede zin erbij.',
+        'links': [f'https://example.com/{i}'] if i < with_links else [],
+        'sources': [f'Bron {i}'],
+    } for i in range(count)]
+
+
+def test_publishable_rejects_incident_2026_08_25():
+    """Regressie: de echte payload van 25 augustus moet worden afgekeurd."""
+    from src.ai import check_publishable
+
+    reason = check_publishable(INCIDENT_2026_08_25)
+    assert reason is not None, 'de lege nieuwsbrief van 25 augustus kwam er doorheen'
+    print('  PASS test_publishable_rejects_incident_2026_08_25')
+
+
+def test_publishable_accepts_normal_newsletter():
+    """Een normale set van 4 artikelen met links komt erdoor."""
+    from src.ai import check_publishable
+
+    reason = check_publishable(_articles(4))
+    assert reason is None, f'normale nieuwsbrief onterecht afgekeurd: {reason}'
+    print('  PASS test_publishable_accepts_normal_newsletter')
+
+
+def test_publishable_rejects_too_few_articles():
+    """Twee artikelen is te weinig, ook al hebben ze allebei links."""
+    from src.ai import check_publishable
+
+    assert check_publishable(_articles(2)) is not None
+    print('  PASS test_publishable_rejects_too_few_articles')
+
+
+def test_publishable_accepts_newsletter_without_links():
+    """Regressie op 18 en 22 augustus: check_and_resolve_url() strijkt zoveel links weg
+    dat een echte nieuwsbrief er maar een overhoudt. Die mag niet worden afgekeurd."""
+    from src.ai import check_publishable
+
+    reason = check_publishable(_articles(6, with_links=1))
+    assert reason is None, f'echte nieuwsbrief zonder links onterecht afgekeurd: {reason}'
+    print('  PASS test_publishable_accepts_newsletter_without_links')
+
+
+def test_publishable_rejects_empty_summary():
+    """Een whitespace-only samenvatting wordt afgekeurd."""
+    from src.ai import check_publishable
+
+    articles = _articles(4)
+    articles[2]['summary'] = '   \n  '
+    reason = check_publishable(articles)
+    assert reason is not None and 'Artikel 2' in reason, f'onverwachte reden: {reason}'
+    print('  PASS test_publishable_rejects_empty_summary')
+
+
+# ---------------------------------------------------------------------------
+# Ophaalvenster: een late vorige run mag het venster niet uithongeren
+# ---------------------------------------------------------------------------
+
+def _write_last_sent(tmpdir: Path, schedule: str, moment) -> Path:
+    path = tmpdir / 'last_sent.json'
+    path.write_text(json.dumps({'last_sent': {schedule: moment.isoformat()}}))
+    return path
+
+
+def test_lookback_floor_when_last_send_was_recent():
+    """Kern van het incident: last_sent 2 uur geleden -> venster toch 24 uur terug."""
+    from datetime import datetime, timedelta, timezone
+    from src import gmail
+
+    now = datetime.now(timezone.utc)
+    with tempfile.TemporaryDirectory() as tmp:
+        path = _write_last_sent(Path(tmp), 'daily', now - timedelta(hours=2))
+        with patch.object(gmail, 'LAST_SENT_FILE', path):
+            start = gmail.fetch_window_start('daily')
+
+    age = now - start
+    assert age >= timedelta(hours=23, minutes=59), f'venster is maar {age}, verwacht >= 24u'
+    print('  PASS test_lookback_floor_when_last_send_was_recent')
+
+
+def test_lookback_uses_last_sent_when_older_than_floor():
+    """last_sent 3 dagen geleden -> venster blijft die 3 dagen, niet ingekort tot 24u."""
+    from datetime import datetime, timedelta, timezone
+    from src import gmail
+
+    now = datetime.now(timezone.utc)
+    three_days_ago = now - timedelta(days=3)
+    with tempfile.TemporaryDirectory() as tmp:
+        path = _write_last_sent(Path(tmp), 'daily', three_days_ago)
+        with patch.object(gmail, 'LAST_SENT_FILE', path):
+            start = gmail.fetch_window_start('daily')
+
+    assert abs((start - three_days_ago).total_seconds()) < 1, f'verwacht {three_days_ago}, kreeg {start}'
+    print('  PASS test_lookback_uses_last_sent_when_older_than_floor')
+
+
+def test_lookback_weekly_floor_is_a_week():
+    """Weekly kijkt minstens 7 dagen terug."""
+    from datetime import datetime, timedelta, timezone
+    from src import gmail
+
+    now = datetime.now(timezone.utc)
+    with tempfile.TemporaryDirectory() as tmp:
+        path = _write_last_sent(Path(tmp), 'weekly', now - timedelta(hours=2))
+        with patch.object(gmail, 'LAST_SENT_FILE', path):
+            start = gmail.fetch_window_start('weekly')
+
+    assert now - start >= timedelta(days=6, hours=23), 'weekly-venster is korter dan 7 dagen'
+    print('  PASS test_lookback_weekly_floor_is_a_week')
+
+
+def test_lookback_falls_back_when_file_missing():
+    """Ontbrekend last_sent.json valt terug op de ondergrens in plaats van te crashen."""
+    from datetime import datetime, timedelta, timezone
+    from src import gmail
+
+    now = datetime.now(timezone.utc)
+    with tempfile.TemporaryDirectory() as tmp:
+        with patch.object(gmail, 'LAST_SENT_FILE', Path(tmp) / 'bestaat-niet.json'):
+            start = gmail.fetch_window_start('daily')
+
+    assert now - start >= timedelta(hours=23, minutes=59)
+    print('  PASS test_lookback_falls_back_when_file_missing')
+
+
+# ---------------------------------------------------------------------------
+# Verzending: reconnect na een gebroken SMTP-verbinding, en eerlijk tellen
+# ---------------------------------------------------------------------------
+
+def _patch_mailer_io(subscribers: list[str]):
+    """Patch alles wat send_newsletter buiten SMTP om aanraakt."""
+    return [
+        patch('src.mailer.get_subscribers', return_value=subscribers),
+        patch('src.mailer.get_mailerlog', return_value=set()),
+        patch('src.mailer.mailerlog'),
+        patch('src.mailer.delete_email', return_value=True),
+        patch('src.mailer.update_last_sent_timestamp'),
+        patch('src.mailer.time.sleep'),
+    ]
+
+
+def test_smtp_reconnects_after_broken_connection():
+    """Incident 08:46: verbinding valt weg. Verwacht reconnect, iedereen bezorgd."""
+    import smtplib
+    from contextlib import ExitStack
+    from src import mailer
+
+    subscribers = [f'user{i}@example.com' for i in range(5)]
+    dead, fresh = MagicMock(), MagicMock()
+    # De eerste server bezorgt er twee en valt dan om, precies zoals op 25 augustus.
+    dead.sendmail.side_effect = [None, None, smtplib.SMTPServerDisconnected('reset by peer')]
+
+    with ExitStack() as stack:
+        for p in _patch_mailer_io(subscribers):
+            stack.enter_context(p)
+        connect = stack.enter_context(
+            patch('src.mailer.connect_smtp', side_effect=[dead, fresh]))
+        log = stack.enter_context(patch('src.mailer.lg'))
+        mailer.send_newsletter('daily', '<html>[EMAIL]</html>', 'Titel')
+
+    assert connect.call_count == 2, f'verwacht een reconnect, kreeg {connect.call_count} verbinding(en)'
+    assert fresh.sendmail.call_count == 3, f'verse verbinding bezorgde er {fresh.sendmail.call_count}, verwacht 3'
+    assert not log.error.called, f'geslaagde retry mag geen ERROR loggen: {log.error.call_args_list}'
+    assert log.warning.called, 'een reconnect hoort een WARNING te loggen'
+    print('  PASS test_smtp_reconnects_after_broken_connection')
+
+
+def test_smtp_reports_actual_count_not_subscriber_count():
+    """Incident: log meldde 'Sent to 56 recipients' terwijl er 29 aankwamen."""
+    import smtplib
+    from contextlib import ExitStack
+    from src import mailer
+
+    subscribers = [f'user{i}@example.com' for i in range(4)]
+    server = MagicMock()
+    # user2 faalt structureel: eerste poging en de retry na reconnect.
+    def sendmail(_from, to, _msg):
+        if to == ['user2@example.com']:
+            raise smtplib.SMTPRecipientsRefused({to[0]: (550, b'no such user')})
+    server.sendmail.side_effect = sendmail
+
+    with ExitStack() as stack:
+        for p in _patch_mailer_io(subscribers):
+            stack.enter_context(p)
+        stack.enter_context(patch('src.mailer.connect_smtp', return_value=server))
+        log = stack.enter_context(patch('src.mailer.lg'))
+        mailer.send_newsletter('daily', '<html>[EMAIL]</html>', 'Titel')
+
+    completed = ' '.join(str(c) for c in log.info.call_args_list)
+    assert 'Sent to 3 of 4' in completed, f'oneerlijke telling in afsluitregel: {completed}'
+
+    errors = ' '.join(str(c) for c in log.error.call_args_list)
+    assert 'user2@example.com' in errors, 'gemiste abonnee wordt niet naar Janitor gemeld'
+    assert '--resend' in errors, 'foutmelding noemt de herstelactie niet'
+    print('  PASS test_smtp_reports_actual_count_not_subscriber_count')
+
+
 def main():
     os.environ.setdefault('DATABASE_URL', 'postgresql://test/test')
     tests = [
@@ -216,6 +432,17 @@ def main():
         test_retry_prompt_exhausts_and_reraises_connection_error,
         test_retry_prompt_still_retries_ratelimit,
         test_retry_prompt_uses_exponential_backoff,
+        test_publishable_rejects_incident_2026_08_25,
+        test_publishable_accepts_normal_newsletter,
+        test_publishable_rejects_too_few_articles,
+        test_publishable_accepts_newsletter_without_links,
+        test_publishable_rejects_empty_summary,
+        test_lookback_floor_when_last_send_was_recent,
+        test_lookback_uses_last_sent_when_older_than_floor,
+        test_lookback_weekly_floor_is_a_week,
+        test_lookback_falls_back_when_file_missing,
+        test_smtp_reconnects_after_broken_connection,
+        test_smtp_reports_actual_count_not_subscriber_count,
     ]
     failed = 0
     for t in tests:
