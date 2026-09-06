@@ -32,7 +32,7 @@ requires-dist = [
     { name = "httpx" },
     { name = "justai", specifier = ">=5.5.0" },
     { name = "justdays" },
-    { name = "justlog", git = "https://github.com/hpharmsen/justlog.git?rev=0.8.5" },
+    { name = "justlog", git = "https://github.com/hpharmsen/justlog.git?rev=0.9.0" },
     { name = "psycopg2-binary" },
     { name = "python-dotenv" },
     { name = "sqlalchemy" },
@@ -783,8 +783,8 @@ wheels = [
 
 [[package]]
 name = "justlog"
-version = "0.8.5"
-source = { git = "https://github.com/hpharmsen/justlog.git?rev=0.8.5#000fd850a7b08be216a45b5afb409a9ac3bdb3c5" }
+version = "0.9.0"
+source = { git = "https://github.com/hpharmsen/justlog.git?rev=0.9.0#e49918ee0660a98f85e88d65e3f17a5bc644e482" }
 
 [[package]]
 name = "lxml"
