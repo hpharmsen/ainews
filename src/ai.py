@@ -6,7 +6,8 @@ from typing import Tuple
 
 import httpx
 from justai import Model
-from justai.models.basemodel import ConnectionException, ModelOverloadException, RatelimitException
+from justai.models.basemodel import (ConnectionException, GeneralException, ModelOverloadException,
+                                     RatelimitException)
 from justdays import Day
 from pydantic import BaseModel, Field, HttpUrl
 from typing import Annotated
@@ -29,6 +30,9 @@ PROMPTS_DIR = Path(__file__).parent / 'prompts'
 COLORS = ['rood', 'groen', 'grijs', 'bruin', 'oranje', 'paars', 'blauw']
 
 MIN_ARTICLES = 3
+
+# HTTP-statussen die vanzelf overgaan. 529 is Anthropic's Overloaded.
+TRANSIENT_STATUS_CODES = {429, 500, 502, 503, 504, 529}
 
 def load_prompt(name: str, **kwargs) -> str:
     """Load a prompt template from the prompts folder and substitute variables."""
@@ -308,7 +312,7 @@ def extract_relevant_source_text(article: dict, source_text: str) -> str:
                          source_text=source_text)
 
     model = Model('claude-haiku-4-5')
-    return model.prompt(prompt, return_json=False, cached=False)
+    return retry_prompt(model, prompt, return_json=False)
 
 
 def generate_infographic(articles: list[dict], emails_dict: dict[str, str], schedule: str, cached: bool, visual_selection: dict, max_retries: int = 5) -> Tuple[int | None, str | None]:
@@ -400,13 +404,23 @@ def select_articles_for_visuals(articles: list[dict]) -> dict:
     return retry_prompt(model, prompt)
 
 
-def retry_prompt(model, prompt) -> dict:
+def retry_prompt(model, prompt, return_json: bool = True):
+    """Prompt het model, met retry op transiente fouten. WARNING per poging, daarna doorgooien."""
     attempts = 5
     for attempt in range(attempts):
         try:
-            return model.prompt(prompt, return_json=True, cached=False)
-        except (RatelimitException, ModelOverloadException, ConnectionException) as e:
+            return model.prompt(prompt, return_json=return_json, cached=False)
+        except (RatelimitException, ModelOverloadException, ConnectionException, GeneralException) as e:
+            # justai verpakt een 529 Overloaded in GeneralException, niet in ModelOverloadException:
+            # anthropic's OverloadedError is geen InternalServerError. Vandaar de status-check op de
+            # originele fout, zodat een permanente fout niet vijf keer geprobeerd wordt.
+            original = e.args[0] if e.args else None
+            if isinstance(e, GeneralException) and getattr(original, 'status_code', None) not in TRANSIENT_STATUS_CODES:
+                raise
             if attempt == attempts - 1:
+                # Geen lg.error hier: main.py logt de doorgegooide fout al als CRITICAL.
+                # Allebei zou Janitor twee issues geven voor één gebeurtenis.
+                lg.warning(f'{type(e).__name__} na {attempts} pogingen, opgegeven: {e}')
                 raise
             wait = min(5 * 2 ** attempt, 60)
             lg.warning(f'{type(e).__name__}: {e}. Retrying in {wait}s '

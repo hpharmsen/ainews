@@ -4,6 +4,7 @@ import imaplib
 import email
 import email.header
 import json
+import time
 from datetime import datetime, timezone, timedelta
 from email.utils import parseaddr, parsedate_to_datetime
 from email.header import decode_header
@@ -32,15 +33,24 @@ class Mail:
         self.imap_server = os.getenv('EMAIL_IMAP_SERVER', 'imap.gmail.com')
         self.imap_port = int(os.getenv('EMAIL_IMAP_PORT', 993))
 
-    def connect(self):
-        """Connect to the IMAP server."""
-        try:
-            self.mail = imaplib.IMAP4_SSL(self.imap_server, self.imap_port)
-            self.mail.login(self.email_user, self.email_pass)
-            return True
-        except Exception as e:
-            lg.error(f"Failed to connect to IMAP server: {str(e)}")
-            return False
+    def connect(self, attempts: int = 3) -> bool:
+        """Connect to the IMAP server, met retry op transiente verbindingsfouten."""
+        for attempt in range(attempts):
+            try:
+                self.mail = imaplib.IMAP4_SSL(self.imap_server, self.imap_port)
+                self.mail.login(self.email_user, self.email_pass)
+                return True
+            except Exception as e:
+                # Alleen netwerkblips zijn een retry waard. [Errno 54] Connection reset by peer is
+                # een OSError, een fout wachtwoord een imaplib.IMAP4.error en die gaat niet over.
+                if not isinstance(e, (OSError, imaplib.IMAP4.abort)) or attempt == attempts - 1:
+                    lg.error(f"Failed to connect to IMAP server: {str(e)}")
+                    return False
+                wait = 2 * 2 ** attempt
+                lg.warning(f'IMAP connect attempt {attempt + 1}/{attempts} failed: {e}. '
+                           f'Retrying in {wait}s...')
+                time.sleep(wait)
+        return False
 
     def delete_email(self, identifier, folder='[Gmail]/Sent Mail'):
         """
