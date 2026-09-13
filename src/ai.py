@@ -285,7 +285,7 @@ def generate_ai_image(articles: list[dict], schedule: str, cached: bool, article
                 if attempt == max_retries - 1:
                     lg.error(f'Failed to generate image: {str(e)}')
                     raise
-                lg.error(f'Error generating image: {str(e)}. Retrying...')
+                lg.warning(f'Error generating image: {str(e)}. Retrying...')
                 time.sleep(min(30 * 2 ** attempt, 300))
 
     # Upload to S3
@@ -371,7 +371,7 @@ def generate_infographic(articles: list[dict], emails_dict: dict[str, str], sche
                 if attempt == max_retries - 1:  # Last attempt
                     lg.error(f"Failed to generate infographic: {str(e)}")
                     break
-                lg.error(f"Error generating infographic: {str(e)}. Retrying...")
+                lg.warning(f"Error generating infographic: {str(e)}. Retrying...")
                 time.sleep(min(30 * 2 ** attempt, 300))
 
         if not generated:
