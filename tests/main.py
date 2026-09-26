@@ -3,6 +3,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -596,6 +597,297 @@ def test_subscriber_lookup_still_returns_status_and_timestamp():
 
 
 # ---------------------------------------------------------------------------
+# Afhandelaar van het label nieuwsbrief
+# ---------------------------------------------------------------------------
+
+MIGADU_BOUNCE = """This is the mail system at host rel11.migadu.com.
+
+I'm sorry to have to inform you that your message could not
+be delivered to one or more recipients.
+
+<jeroen@nas.nl>: host mx3.hostghost.nl[154.59.104.23] said: 550 Sender's policy
+    prohibits this message: Reject (in reply to end of DATA command)
+"""
+
+
+def _reply_message(sender: str, subject: str, body: str,
+                   date: str = 'Wed, 23 Sep 2026 06:59:53 +0000'):
+    """Een echte mail, zodat de headerverwerking niet wegvalt achter een mock."""
+    from email.message import EmailMessage
+
+    msg = EmailMessage()
+    msg['From'] = sender
+    msg['Subject'] = subject
+    msg['Date'] = date
+    msg.set_content(body)
+    return msg
+
+
+def _fake_mail(messages: dict, delete_ok: bool = True, connected: bool = True):
+    """Een Mail-dubbel met deze berichten in het label, met de echte bounce-extractie."""
+    from src.gmail import Mail
+
+    mail = MagicMock(spec=Mail)
+    mail.connect.return_value = connected
+    mail.mail = MagicMock()
+    mail.mail.select.return_value = ('OK', [b''])
+    mail.mail.uid.return_value = ('OK', [' '.join(messages).encode()])
+    mail.get_message.side_effect = messages.get
+    mail.delete_email.return_value = delete_ok
+    mail._extract_original_recipient.side_effect = (
+        lambda msg: Mail._extract_original_recipient(mail, msg))
+    return mail
+
+
+def _run_handler(tmpdir: Path, mail, category, *, status=None, seen=None):
+    """Draai handle_replies() met alles buiten IMAP en het model afgevangen.
+
+    Geeft (update_calls, undelivered_data, logregels, weggeschreven tijdstempel) terug.
+    """
+    import src.replies as replies
+
+    seen_file = tmpdir / 'replies_seen.json'
+    if seen is not None:
+        seen_file.write_text(json.dumps({'last_pass': seen}))
+    log_file = tmpdir / 'replieslog.txt'
+    undelivered = tmpdir / 'undelivered.json'
+
+    classify = category if callable(category) else (lambda *a, **k: category)
+    update = MagicMock(return_value=True)
+
+    with patch.object(replies, 'Mail', return_value=mail), \
+            patch.object(replies, 'SEEN_FILE', seen_file), \
+            patch.object(replies, 'LOG_FILE', log_file), \
+            patch.object(replies, 'classify_reply', side_effect=classify) as classify_mock, \
+            patch.object(replies, 'get_subscriber_status', return_value=status), \
+            patch.object(replies, 'update_subscription', update), \
+            patch('src.undelivered.undelivered_file', undelivered), \
+            patch('src.replies.mark_undeliverable') as mark_mock:
+        replies.handle_replies()
+
+    lines = log_file.read_text(encoding='utf-8').splitlines() if log_file.exists() else []
+    counts = json.loads(undelivered.read_text()) if undelivered.exists() else {}
+    stamp = json.loads(seen_file.read_text())['last_pass'] if seen_file.exists() else None
+    return {'update': update, 'counts': counts, 'lines': lines, 'stamp': stamp,
+            'classify': classify_mock, 'mark': mark_mock}
+
+
+def test_replies_unsubscribes_a_known_address():
+    """AE1: afmelding van een bekend adres levert unsubscribed, verwijderen en een logregel."""
+    with tempfile.TemporaryDirectory() as tmp:
+        mail = _fake_mail({'3': _reply_message('amy.klewis@hotmail.co.uk', 'unsubscribe',
+                                               'Apple Mail sent this email to unsubscribe')})
+        r = _run_handler(Path(tmp), mail, 'afmelding', status={'status': 'daily', 'updated_at': None})
+
+    r['update'].assert_called_once_with('amy.klewis@hotmail.co.uk', 'unsubscribed')
+    mail.delete_email.assert_called_once_with('3', folder='nieuwsbrief')
+    assert len(r['lines']) == 1, f'verwacht 1 logregel, kreeg {r["lines"]}'
+    assert 'amy.klewis@hotmail.co.uk' in r['lines'][0] and 'afmelding' in r['lines'][0]
+    print('  PASS test_replies_unsubscribes_a_known_address')
+
+
+def test_replies_drops_an_unknown_unsubscribe_silently():
+    """AE7: onbekend adres levert geen databaseschrijfactie en geen lg.error."""
+    with tempfile.TemporaryDirectory() as tmp:
+        mail = _fake_mail({'7': _reply_message('vreemd@example.com', 'unsubscribe', 'stop maar')})
+        with patch('src.replies.lg') as lg_mock:
+            r = _run_handler(Path(tmp), mail, 'afmelding', status=None)
+
+    assert not r['update'].called, 'onbekend adres mag niet uitgeschreven worden'
+    mail.delete_email.assert_called_once_with('7', folder='nieuwsbrief')
+    assert len(r['lines']) == 1, f'verwacht 1 logregel, kreeg {r["lines"]}'
+    assert not lg_mock.error.called, f'onverwachte lg.error: {lg_mock.error.call_args}'
+    print('  PASS test_replies_drops_an_unknown_unsubscribe_silently')
+
+
+def test_replies_deletes_a_delay_without_counting_it():
+    """AE3: een delay-melding verdwijnt, maar raakt de bouncetelling niet."""
+    with tempfile.TemporaryDirectory() as tmp:
+        mail = _fake_mail({'2': _reply_message('mailer-daemon@googlemail.com',
+                                               'Delivery Status Notification (Delay)',
+                                               'will retry for 46 more hours hero@hetab.org')})
+        r = _run_handler(Path(tmp), mail, 'delay')
+
+    mail.delete_email.assert_called_once_with('2', folder='nieuwsbrief')
+    assert r['counts'] == {}, f'delay mag niet meetellen, kreeg {r["counts"]}'
+    assert not r['mark'].called, 'delay mag niemand op undeliverable zetten'
+    assert len(r['lines']) == 1
+    print('  PASS test_replies_deletes_a_delay_without_counting_it')
+
+
+def test_replies_counts_a_permanent_bounce():
+    """AE4: een 5xx-bounce verhoogt permanent_count voor het geextraheerde adres."""
+    with tempfile.TemporaryDirectory() as tmp:
+        mail = _fake_mail({'15': _reply_message('MAILER-DAEMON@migadu.com',
+                                                'Undelivered Mail Returned to Sender',
+                                                MIGADU_BOUNCE)})
+        r = _run_handler(Path(tmp), mail, 'bounce')
+
+    assert 'jeroen@nas.nl' in r['counts'], f'adres niet geteld, kreeg {r["counts"]}'
+    entry = r['counts']['jeroen@nas.nl']
+    assert entry['permanent_count'] == 1, f'permanent_count is {entry["permanent_count"]}'
+    assert entry['count'] == 1, f'count is {entry["count"]}'
+    mail.delete_email.assert_called_once_with('15', folder='nieuwsbrief')
+    print('  PASS test_replies_counts_a_permanent_bounce')
+
+
+def test_replies_does_not_count_a_bounce_it_could_not_delete():
+    """Tellen na verwijderen, anders telt de volgende pass dezelfde bounce nog eens."""
+    with tempfile.TemporaryDirectory() as tmp:
+        mail = _fake_mail({'15': _reply_message('MAILER-DAEMON@migadu.com', 'Undelivered',
+                                                MIGADU_BOUNCE)}, delete_ok=False)
+        r = _run_handler(Path(tmp), mail, 'bounce')
+
+    assert r['counts'] == {}, f'mislukte verwijdering mag niet tellen, kreeg {r["counts"]}'
+    assert r['lines'] == [], f'geen actie, dus geen logregel, kreeg {r["lines"]}'
+    print('  PASS test_replies_does_not_count_a_bounce_it_could_not_delete')
+
+
+def test_replies_leaves_a_bounce_without_a_recipient_alone():
+    """Zonder ontvangeradres valt er niets te tellen, dus blijft het bericht staan."""
+    with tempfile.TemporaryDirectory() as tmp:
+        mail = _fake_mail({'9': _reply_message('MAILER-DAEMON@example.com', 'Undelivered',
+                                               'iets ging mis, geen adres te vinden')})
+        r = _run_handler(Path(tmp), mail, 'bounce')
+
+    assert not mail.delete_email.called, 'bericht had moeten blijven staan'
+    assert r['counts'] == {}, f'niets te tellen, kreeg {r["counts"]}'
+    print('  PASS test_replies_leaves_a_bounce_without_a_recipient_alone')
+
+
+def test_replies_skips_a_message_older_than_the_timestamp():
+    """AE6: wat gisteren al bekeken is krijgt vandaag geen tweede gok."""
+    with tempfile.TemporaryDirectory() as tmp:
+        mail = _fake_mail({'4': _reply_message('elise@idest.nl', 'Re: daily', ELISE,
+                                               date='Sat, 18 Apr 2026 15:31:28 +0200')})
+        r = _run_handler(Path(tmp), mail, 'hp', seen='2026-09-01T00:00:00+00:00')
+
+    assert not r['classify'].called, 'oud bericht mag geen modelaanroep kosten'
+    assert not mail.delete_email.called
+    print('  PASS test_replies_skips_a_message_older_than_the_timestamp')
+
+
+def test_replies_skips_its_own_mail():
+    """R2: verzonden nieuwsbrieven en HP's eigen antwoorden zitten ook in het label."""
+    with tempfile.TemporaryDirectory() as tmp:
+        mail = _fake_mail({
+            '1': _reply_message('nieuwsbrief@harmsen.nl', "HP's AI weekly - week 39", 'de brief'),
+            '7': _reply_message('hp@harmsen.nl', 'Re: HP AI daily', 'mijn antwoord'),
+        })
+        r = _run_handler(Path(tmp), mail, 'afmelding')
+
+    assert not r['classify'].called, 'eigen post mag geen modelaanroep kosten'
+    assert not mail.delete_email.called, 'eigen post moet blijven staan'
+    print('  PASS test_replies_skips_its_own_mail')
+
+
+def test_replies_survives_a_failing_classification():
+    """AE5: één lg.error, het tijdstempel blijft staan, en de run gaat door."""
+    from justai.models.basemodel import ConnectionException
+
+    def boom(*args, **kwargs):
+        raise ConnectionException('model onbereikbaar')
+
+    with tempfile.TemporaryDirectory() as tmp:
+        mail = _fake_mail({'3': _reply_message('iemand@example.com', 'unsubscribe', 'stop')})
+        with patch('src.replies.lg') as lg_mock:
+            r = _run_handler(Path(tmp), mail, boom, seen='2026-01-01T00:00:00+00:00')
+
+    assert lg_mock.error.call_count == 1, f'verwacht 1 lg.error, kreeg {lg_mock.error.call_count}'
+    assert r['stamp'] == '2026-01-01T00:00:00+00:00', f'tijdstempel schoof op naar {r["stamp"]}'
+    assert not mail.delete_email.called
+    print('  PASS test_replies_survives_a_failing_classification')
+
+
+def test_replies_survives_a_failing_imap_connection():
+    """Geen exception en geen exit(): de nieuwsbrief moet gewoon uit kunnen."""
+    with tempfile.TemporaryDirectory() as tmp:
+        mail = _fake_mail({}, connected=False)
+        with patch('src.replies.lg') as lg_mock:
+            r = _run_handler(Path(tmp), mail, 'hp', seen='2026-01-01T00:00:00+00:00')
+
+    assert lg_mock.error.called, 'een mislukte verbinding hoort een lg.error te geven'
+    assert r['stamp'] == '2026-01-01T00:00:00+00:00', 'tijdstempel mag niet opschuiven'
+    print('  PASS test_replies_survives_a_failing_imap_connection')
+
+
+def test_replies_advances_the_timestamp_on_an_empty_label():
+    """Een leeg label is geen fout, en de pass is wel geslaagd."""
+    with tempfile.TemporaryDirectory() as tmp:
+        mail = _fake_mail({})
+        with patch('src.replies.lg') as lg_mock:
+            r = _run_handler(Path(tmp), mail, 'hp', seen='2026-01-01T00:00:00+00:00')
+
+    assert not lg_mock.error.called, f'leeg label gaf lg.error: {lg_mock.error.call_args}'
+    assert r['stamp'] != '2026-01-01T00:00:00+00:00', 'tijdstempel had moeten opschuiven'
+    print('  PASS test_replies_advances_the_timestamp_on_an_empty_label')
+
+
+def test_replies_processes_everything_without_a_timestamp_file():
+    """Zonder data/replies_seen.json is de hele achterstand nieuw."""
+    with tempfile.TemporaryDirectory() as tmp:
+        mail = _fake_mail({'12': _reply_message('elise@idest.nl', 'Re: daily', ELISE,
+                                                date='Mon, 20 Oct 2025 13:53:06 +0200')})
+        r = _run_handler(Path(tmp), mail, 'hp', seen=None)
+
+    assert r['classify'].call_count == 1, 'oude post moet alsnog langs het model'
+    print('  PASS test_replies_processes_everything_without_a_timestamp_file')
+
+
+def test_replies_leaves_hp_mail_untouched():
+    """R11: werk voor HP blijft staan en levert geen logregel."""
+    with tempfile.TemporaryDirectory() as tmp:
+        mail = _fake_mail({'4': _reply_message('elise@idest.nl', 'Re: daily', ELISE)})
+        r = _run_handler(Path(tmp), mail, 'hp')
+
+    assert not mail.delete_email.called, 'hp-post mag niet verwijderd worden'
+    assert not r['update'].called
+    assert r['lines'] == [], f'hp hoort geen logregel te geven, kreeg {r["lines"]}'
+    print('  PASS test_replies_leaves_hp_mail_untouched')
+
+
+def test_replies_keeps_a_log_line_on_one_line():
+    """R12: het tekstfragment is vrije tekst, dus regelafbrekingen moeten eruit."""
+    with tempfile.TemporaryDirectory() as tmp:
+        mail = _fake_mail({'3': _reply_message('iemand@example.com', 'unsubscribe',
+                                               'Regel een\nRegel twee\r\nRegel drie')})
+        r = _run_handler(Path(tmp), mail, 'afmelding', status={'status': 'daily', 'updated_at': None})
+
+    assert len(r['lines']) == 1, f'verwacht 1 regel, kreeg {len(r["lines"])}: {r["lines"]}'
+    assert r['lines'][0].count('\t') == 4, f'verwacht 5 velden, kreeg {r["lines"][0]!r}'
+    assert 'Regel een Regel twee Regel drie' in r['lines'][0], r['lines'][0]
+    print('  PASS test_replies_keeps_a_log_line_on_one_line')
+
+
+def test_replies_stamps_the_start_of_the_pass():
+    """KTD4: post die tijdens de pass binnenkomt moet de volgende keer alsnog gezien worden."""
+    from datetime import datetime, timezone
+
+    import src.replies as replies
+
+    before = datetime.now(timezone.utc)
+    with tempfile.TemporaryDirectory() as tmp:
+        mail = _fake_mail({'4': _reply_message('elise@idest.nl', 'Re: daily', ELISE)})
+        # get_message vertraagt de pass, zodat begin en eind aantoonbaar verschillen.
+        real_get = mail.get_message.side_effect
+
+        def slow(uid):
+            time.sleep(0.2)
+            return real_get(uid)
+
+        mail.get_message.side_effect = slow
+        r = _run_handler(Path(tmp), mail, 'hp')
+    after = datetime.now(timezone.utc)
+
+    stamp = datetime.fromisoformat(r['stamp'])
+    assert before <= stamp, f'tijdstempel {stamp} ligt voor het begin van de pass'
+    assert (after - stamp).total_seconds() >= 0.2, (
+        f'tijdstempel {stamp} is het eind van de pass, niet het begin')
+    assert replies.SEEN_FILE.name == 'replies_seen.json'
+    print('  PASS test_replies_stamps_the_start_of_the_pass')
+
+
+# ---------------------------------------------------------------------------
 # Verzending: reconnect na een gebroken SMTP-verbinding, en eerlijk tellen
 # ---------------------------------------------------------------------------
 
@@ -701,6 +993,21 @@ def main():
         test_subscriber_lookup_raises_on_a_database_failure,
         test_subscriber_lookup_returns_none_for_an_unknown_address,
         test_subscriber_lookup_still_returns_status_and_timestamp,
+        test_replies_unsubscribes_a_known_address,
+        test_replies_drops_an_unknown_unsubscribe_silently,
+        test_replies_deletes_a_delay_without_counting_it,
+        test_replies_counts_a_permanent_bounce,
+        test_replies_does_not_count_a_bounce_it_could_not_delete,
+        test_replies_leaves_a_bounce_without_a_recipient_alone,
+        test_replies_skips_a_message_older_than_the_timestamp,
+        test_replies_skips_its_own_mail,
+        test_replies_survives_a_failing_classification,
+        test_replies_survives_a_failing_imap_connection,
+        test_replies_advances_the_timestamp_on_an_empty_label,
+        test_replies_processes_everything_without_a_timestamp_file,
+        test_replies_leaves_hp_mail_untouched,
+        test_replies_keeps_a_log_line_on_one_line,
+        test_replies_stamps_the_start_of_the_pass,
         test_smtp_reconnects_after_broken_connection,
         test_smtp_reports_actual_count_not_subscriber_count,
     ]

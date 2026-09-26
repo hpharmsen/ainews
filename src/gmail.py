@@ -209,6 +209,17 @@ class Mail:
         except Exception:
             return None
 
+    def get_message(self, email_uid):
+        """De volledige mail als geparst message-object, of None."""
+        try:
+            status, msg_data = self.mail.uid('fetch', email_uid, '(RFC822)')
+            if status != 'OK' or not msg_data or not isinstance(msg_data[0], tuple):
+                return None
+            return email.message_from_bytes(msg_data[0][1])
+        except Exception as e:
+            lg.error(f"Error fetching message {email_uid}: {str(e)}")
+            return None
+
     def get_email_body(self, email_uid):
         """
         Get the email body for a given email UID, as text with the source links intact.
@@ -223,13 +234,10 @@ class Mail:
         Returns:
             str: The email body text or None if not found
         """
+        msg = self.get_message(email_uid)
+        if msg is None:
+            return None
         try:
-            status, msg_data = self.mail.uid('fetch', email_uid, '(RFC822)')
-            if status != 'OK' or not msg_data or not isinstance(msg_data[0], tuple):
-                return None
-
-            msg = email.message_from_bytes(msg_data[0][1])
-
             plain = html = None
             for part in msg.walk():  # Ook bij niet-multipart levert dit het bericht zelf
                 if 'attachment' in str(part.get('Content-Disposition')):
