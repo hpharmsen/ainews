@@ -528,6 +528,74 @@ def test_classify_lets_a_model_failure_through():
 
 
 # ---------------------------------------------------------------------------
+# Abonnee-lookup: een databasestoring is niet hetzelfde als "adres bestaat niet"
+# ---------------------------------------------------------------------------
+
+def _subscriber_table():
+    """Een echte tabeldefinitie, zodat select() een geldige query kan bouwen."""
+    from sqlalchemy import Column, DateTime, MetaData, String, Table
+
+    return Table('nieuwsbrief_subscriber', MetaData(),
+                 Column('email', String), Column('status', String), Column('updated_at', DateTime))
+
+
+def _patch_subscriber_db(row=None, error: Exception | None = None):
+    """Patch subscribers.db zodat de query deze rij oplevert, of deze fout."""
+    from contextlib import contextmanager
+
+    @contextmanager
+    def fake_db():
+        conn = MagicMock()
+        if error is not None:
+            conn.execute.side_effect = error
+        else:
+            conn.execute.return_value.fetchone.return_value = row
+        yield conn, {'nieuwsbrief_subscriber': _subscriber_table()}
+
+    return patch('src.subscribers.db', fake_db)
+
+
+def test_subscriber_lookup_raises_on_a_database_failure():
+    """KTD5: stil None teruggeven zou elke afmelding ongemerkt laten verdwijnen."""
+    from src.subscribers import get_subscriber_status
+
+    with _patch_subscriber_db(error=RuntimeError('connection refused')):
+        try:
+            result = get_subscriber_status('iemand@example.com')
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError(f'databasefout werd geslikt, kreeg {result!r}')
+    print('  PASS test_subscriber_lookup_raises_on_a_database_failure')
+
+
+def test_subscriber_lookup_returns_none_for_an_unknown_address():
+    """None betekent voortaan uitsluitend: geen rij gevonden. Zonder lg.error."""
+    from src.subscribers import get_subscriber_status
+
+    with _patch_subscriber_db(row=None), patch('src.subscribers.lg') as lg_mock:
+        result = get_subscriber_status('onbekend@example.com')
+
+    assert result is None, f'verwacht None, kreeg {result!r}'
+    assert not lg_mock.error.called, f'onverwachte lg.error: {lg_mock.error.call_args}'
+    print('  PASS test_subscriber_lookup_returns_none_for_an_unknown_address')
+
+
+def test_subscriber_lookup_still_returns_status_and_timestamp():
+    """Het bestaande gedrag voor een bekend adres blijft ongewijzigd."""
+    from datetime import datetime, timezone
+
+    from src.subscribers import get_subscriber_status
+
+    moment = datetime(2025, 11, 26, 20, 33, tzinfo=timezone.utc)
+    with _patch_subscriber_db(row=('daily', moment)):
+        result = get_subscriber_status('amy.klewis@hotmail.co.uk')
+
+    assert result == {'status': 'daily', 'updated_at': moment}, f'kreeg {result!r}'
+    print('  PASS test_subscriber_lookup_still_returns_status_and_timestamp')
+
+
+# ---------------------------------------------------------------------------
 # Verzending: reconnect na een gebroken SMTP-verbinding, en eerlijk tellen
 # ---------------------------------------------------------------------------
 
@@ -630,6 +698,9 @@ def main():
         test_classify_truncates_a_long_body,
         test_classify_handles_an_empty_body,
         test_classify_lets_a_model_failure_through,
+        test_subscriber_lookup_raises_on_a_database_failure,
+        test_subscriber_lookup_returns_none_for_an_unknown_address,
+        test_subscriber_lookup_still_returns_status_and_timestamp,
         test_smtp_reconnects_after_broken_connection,
         test_smtp_reports_actual_count_not_subscriber_count,
     ]
