@@ -414,6 +414,120 @@ def test_personal_tracking_links_are_recognized():
 
 
 # ---------------------------------------------------------------------------
+# Classificatie van post die binnenkomt op het nieuwsbriefadres
+# ---------------------------------------------------------------------------
+
+# De echte mail van Elise. Klinkt als een afmelding, is het tegenovergestelde.
+ELISE = 'Hoi HP, als ik me niet vergis ontvang ik de nieuwsbrief sinds 10 april niet meer.'
+
+
+def _classify_model(choice: str, confidence: float) -> MagicMock:
+    """Een gemockt System One model dat deze ene keuze teruggeeft."""
+    model = MagicMock()
+    model.classify.return_value = {
+        'type': 'choice',
+        'choice': choice,
+        'confidence': confidence,
+        'probabilities': {choice: confidence},
+    }
+    return model
+
+
+def test_classify_keeps_a_delivery_complaint_away_from_unsubscribing():
+    """AE2: een klacht dat de nieuwsbrief niet aankomt is werk voor HP, geen afmelding."""
+    from src.ai import classify_reply
+
+    model = _classify_model('hp', 1.0)
+    with patch('src.ai.Model', return_value=model):
+        category = classify_reply('elise@idest.nl', "Re: HP's AI daily - 6 april", ELISE)
+
+    assert category == 'hp', f'verwacht hp, kreeg {category}'
+    print('  PASS test_classify_keeps_a_delivery_complaint_away_from_unsubscribing')
+
+
+def test_classify_falls_back_to_hp_below_the_confidence_threshold():
+    """R5: onder de drempel telt de keuze van het model niet, want twijfel wordt hp."""
+    from src.ai import MIN_CONFIDENCE, classify_reply
+
+    model = _classify_model('afmelding', MIN_CONFIDENCE - 0.01)
+    with patch('src.ai.Model', return_value=model):
+        category = classify_reply('iemand@example.com', 'stoppen', 'Graag stoppen.')
+
+    assert category == 'hp', f'twijfel moet hp worden, kreeg {category}'
+    print('  PASS test_classify_falls_back_to_hp_below_the_confidence_threshold')
+
+
+def test_classify_accepts_confidence_exactly_on_the_threshold():
+    """De drempel zelf is genoeg. Anders schuift hij stil een stap op."""
+    from src.ai import MIN_CONFIDENCE, classify_reply
+
+    model = _classify_model('afmelding', MIN_CONFIDENCE)
+    with patch('src.ai.Model', return_value=model):
+        category = classify_reply('iemand@example.com', 'stoppen', 'Graag stoppen.')
+
+    assert category == 'afmelding', f'verwacht afmelding, kreeg {category}'
+    print('  PASS test_classify_accepts_confidence_exactly_on_the_threshold')
+
+
+def test_classify_offers_all_four_categories():
+    """R4: het model moet uit precies deze vier kunnen kiezen, niet uit minder."""
+    from src.ai import classify_reply
+
+    model = _classify_model('hp', 1.0)
+    with patch('src.ai.Model', return_value=model):
+        classify_reply('iemand@example.com', 'iets', 'iets')
+
+    options = model.classify.call_args.args[1]
+    assert set(options) == {'afmelding', 'delay', 'bounce', 'hp'}, f'opties waren {sorted(options)}'
+    assert all(options.values()), 'elke categorie heeft een omschrijving nodig'
+    print('  PASS test_classify_offers_all_four_categories')
+
+
+def test_classify_truncates_a_long_body():
+    """Een doorgestuurde nieuwsbrief in een reply mag de aanroep niet opblazen."""
+    from src.ai import MAX_REPLY_BODY, classify_reply
+
+    model = _classify_model('hp', 1.0)
+    with patch('src.ai.Model', return_value=model):
+        classify_reply('iemand@example.com', 'lang', 'z' * (MAX_REPLY_BODY + 5000))
+
+    state = model.classify.call_args.args[0]
+    assert state.count('z') == MAX_REPLY_BODY, f'{state.count("z")} tekens doorgelaten'
+    print('  PASS test_classify_truncates_a_long_body')
+
+
+def test_classify_handles_an_empty_body():
+    """Een one-click afmelding heeft soms alleen een subject."""
+    from src.ai import classify_reply
+
+    model = _classify_model('afmelding', 1.0)
+    with patch('src.ai.Model', return_value=model):
+        category = classify_reply('iemand@example.com', 'unsubscribe', None)
+
+    assert category == 'afmelding', f'verwacht afmelding, kreeg {category}'
+    assert model.classify.called, 'een lege body mag de aanroep niet overslaan'
+    print('  PASS test_classify_handles_an_empty_body')
+
+
+def test_classify_lets_a_model_failure_through():
+    """R15 wordt door de afhandelaar afgedekt, niet hier. De fout moet naar buiten komen."""
+    from justai.models.basemodel import ConnectionException
+
+    from src.ai import classify_reply
+
+    model = MagicMock()
+    model.classify.side_effect = ConnectionException('geen verbinding')
+    with patch('src.ai.Model', return_value=model):
+        try:
+            classify_reply('iemand@example.com', 'iets', 'iets')
+        except ConnectionException:
+            pass
+        else:
+            raise AssertionError('ConnectionException had door moeten komen')
+    print('  PASS test_classify_lets_a_model_failure_through')
+
+
+# ---------------------------------------------------------------------------
 # Verzending: reconnect na een gebroken SMTP-verbinding, en eerlijk tellen
 # ---------------------------------------------------------------------------
 
@@ -509,6 +623,13 @@ def main():
         test_body_prefers_plaintext_when_it_has_links,
         test_body_cap_keeps_the_news_not_just_the_ad_header,
         test_personal_tracking_links_are_recognized,
+        test_classify_keeps_a_delivery_complaint_away_from_unsubscribing,
+        test_classify_falls_back_to_hp_below_the_confidence_threshold,
+        test_classify_accepts_confidence_exactly_on_the_threshold,
+        test_classify_offers_all_four_categories,
+        test_classify_truncates_a_long_body,
+        test_classify_handles_an_empty_body,
+        test_classify_lets_a_model_failure_through,
         test_smtp_reconnects_after_broken_connection,
         test_smtp_reports_actual_count_not_subscriber_count,
     ]
