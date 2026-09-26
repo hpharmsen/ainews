@@ -888,6 +888,83 @@ def test_replies_stamps_the_start_of_the_pass():
 
 
 # ---------------------------------------------------------------------------
+# Bounces: één ingang, en geen pad dat het proces kan afbreken
+# ---------------------------------------------------------------------------
+
+def test_the_inbox_bounce_route_is_gone():
+    """KTD7: de oude ingang zocht op INBOX en kon met exit() de hele run stoppen."""
+    root = Path(__file__).resolve().parent.parent
+    undelivered = (root / 'src' / 'undelivered.py').read_text()
+    gmail = (root / 'src' / 'gmail.py').read_text()
+    main_py = (root / 'main.py').read_text()
+
+    assert 'exit(' not in undelivered, 'src/undelivered.py bevat nog een exit()'
+    for gone in ('def get_mail(', 'def get_undelivered_emails(',
+                 'def delete_emails(', 'def handle_undelivered('):
+        assert gone not in undelivered, f'{gone} staat nog in src/undelivered.py'
+    assert 'def get_undelivered(' not in gmail, 'Mail.get_undelivered() bestaat nog'
+    assert 'handle_undelivered' not in main_py, 'main.py verwijst nog naar handle_undelivered'
+
+    # Deze twee blijven: de afhandelaar leunt erop.
+    assert 'def _extract_original_recipient(' in gmail
+    assert 'def parse_undelivered_emails(' in undelivered
+    assert 'def mark_undeliverable(' in undelivered
+    print('  PASS test_the_inbox_bounce_route_is_gone')
+
+
+def test_bounce_counting_is_unchanged():
+    """R9 houdt de telfuncties ongewijzigd: 2 voor 5xx, 5 voor 4xx, spam telt niet mee."""
+    from justdays import Day
+
+    today = str(Day())
+    with tempfile.TemporaryDirectory() as tmp:
+        counts_file = Path(tmp) / 'undelivered.json'
+        with patch('src.undelivered.undelivered_file', counts_file):
+            from src.undelivered import parse_undelivered_emails
+
+            to_delete, to_mark = parse_undelivered_emails([
+                {'email_id': '1', 'recipient_email': 'dood@example.com', 'is_permanent': True},
+                {'email_id': '2', 'recipient_email': 'vol@example.com', 'is_permanent': False},
+                {'email_id': '3', 'recipient_email': 'spam@example.com', 'is_spam_rejection': True},
+            ])
+            first = json.loads(counts_file.read_text())
+            # Tweede 5xx op hetzelfde adres raakt de drempel van 2.
+            _, second_mark = parse_undelivered_emails([
+                {'email_id': '4', 'recipient_email': 'dood@example.com', 'is_permanent': True},
+            ])
+
+    assert to_delete == ['1', '2', '3'], f'alles moet weg, kreeg {to_delete}'
+    assert to_mark == [], f'na één bounce nog niemand undeliverable, kreeg {to_mark}'
+    assert first['dood@example.com'] == {'count': 1, 'permanent_count': 1, 'last_bounce': today}
+    assert first['vol@example.com'] == {'count': 1, 'permanent_count': 0, 'last_bounce': today}
+    assert 'spam@example.com' not in first, 'een spam-rejection mag niet meetellen'
+    assert second_mark == ['dood@example.com'], f'drempel 2 niet geraakt, kreeg {second_mark}'
+    print('  PASS test_bounce_counting_is_unchanged')
+
+
+def test_marking_undeliverable_respects_a_resubscribe():
+    """Wie zich na zijn laatste bounce opnieuw aanmeldde houdt zijn abonnement."""
+    from datetime import datetime
+
+    from src.undelivered import mark_undeliverable
+
+    with tempfile.TemporaryDirectory() as tmp:
+        counts_file = Path(tmp) / 'undelivered.json'
+        counts_file.write_text(json.dumps(
+            {'terug@example.com': {'count': 9, 'permanent_count': 1, 'last_bounce': '2026-01-01'}}))
+        with patch('src.undelivered.undelivered_file', counts_file), \
+                patch('src.undelivered.get_subscriber_status',
+                      return_value={'status': 'daily', 'updated_at': datetime(2026, 6, 1)}), \
+                patch('src.undelivered.update_subscription') as update:
+            mark_undeliverable(['terug@example.com'])
+        remaining = json.loads(counts_file.read_text())
+
+    assert not update.called, 'een heraanmelding na de bounce mag niet undeliverable worden'
+    assert remaining == {}, f'de teller had gereset moeten worden, kreeg {remaining}'
+    print('  PASS test_marking_undeliverable_respects_a_resubscribe')
+
+
+# ---------------------------------------------------------------------------
 # Verzending: reconnect na een gebroken SMTP-verbinding, en eerlijk tellen
 # ---------------------------------------------------------------------------
 
@@ -1008,6 +1085,9 @@ def main():
         test_replies_leaves_hp_mail_untouched,
         test_replies_keeps_a_log_line_on_one_line,
         test_replies_stamps_the_start_of_the_pass,
+        test_the_inbox_bounce_route_is_gone,
+        test_bounce_counting_is_unchanged,
+        test_marking_undeliverable_respects_a_resubscribe,
         test_smtp_reconnects_after_broken_connection,
         test_smtp_reports_actual_count_not_subscriber_count,
     ]
