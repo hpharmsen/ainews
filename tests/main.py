@@ -965,6 +965,91 @@ def test_marking_undeliverable_respects_a_resubscribe():
 
 
 # ---------------------------------------------------------------------------
+# De afhandelaar in de nieuwsbrief-run: twee passes, en niet bij --dry-run
+# ---------------------------------------------------------------------------
+
+def _run_main(dry_run: bool = False, source_emails: int = 2, real_replies: bool = False):
+    """Draai main.main() met alles eromheen afgevangen; geeft de aanroeporde terug."""
+    from contextlib import ExitStack
+
+    import main as main_module
+
+    calls = []
+
+    def note(name, result=None):
+        def fn(*args, **kwargs):
+            calls.append(name)
+            return result
+        return fn
+
+    articles = _articles(3)
+    doubles = {
+        'cleanup_cache': MagicMock(),
+        'parse_command_line': MagicMock(return_value=('daily', False, dry_run)),
+        'already_sent_today': MagicMock(return_value=False),
+        'get_raw_mail_text': MagicMock(return_value='ruwe tekst'),
+        'parse_emails_to_dict': MagicMock(
+            return_value={f'bron {i}': 'tekst' for i in range(source_emails)}),
+        'generate_ai_summary': MagicMock(return_value=articles),
+        'edit_articles': MagicMock(return_value=articles),
+        'check_publishable': MagicMock(return_value=None),
+        'select_articles_for_visuals': MagicMock(
+            return_value={'image_article': 0, 'infographic_article': 1}),
+        'generate_ai_image': MagicMock(return_value=(0, 'https://example.com/i.png')),
+        'generate_infographic': MagicMock(return_value=(1, 'https://example.com/g.png')),
+        'create_html_email': MagicMock(return_value='<html></html>'),
+        'add_to_database': MagicMock(),
+        'send_newsletter': MagicMock(side_effect=note('send')),
+        'time': MagicMock(),
+    }
+    if not real_replies:
+        doubles['handle_replies'] = MagicMock(side_effect=note('replies'))
+
+    with ExitStack() as stack:
+        for name, double in doubles.items():
+            stack.enter_context(patch.object(main_module, name, double))
+        if real_replies:
+            # De echte afhandelaar, met een IMAP-verbinding die niet lukt.
+            stack.enter_context(patch('src.replies.Mail', return_value=_fake_mail({}, connected=False)))
+        main_module.main()
+    return calls, doubles
+
+
+def test_main_runs_the_handler_before_and_after_sending():
+    """R13 en R14: een pass vooraf, zodat wie zich gisteren afmeldde niets meer krijgt."""
+    calls, _ = _run_main()
+
+    assert calls == ['replies', 'send', 'replies'], f'aanroeporde was {calls}'
+    print('  PASS test_main_runs_the_handler_before_and_after_sending')
+
+
+def test_main_skips_the_handler_on_a_dry_run():
+    """R16: geen uitschrijvingen en geen verwijderingen bij --dry-run."""
+    calls, _ = _run_main(dry_run=True)
+
+    assert calls == [], f'dry-run mag niets aanroepen, kreeg {calls}'
+    print('  PASS test_main_skips_the_handler_on_a_dry_run')
+
+
+def test_main_runs_the_first_pass_even_when_the_source_gate_stops_the_run():
+    """Te weinig bronmails stopt de nieuwsbrief, maar de afmeldingen zijn dan al verwerkt."""
+    calls, _ = _run_main(source_emails=1)
+
+    assert calls == ['replies'], f'verwacht alleen de eerste pass, kreeg {calls}'
+    print('  PASS test_main_runs_the_first_pass_even_when_the_source_gate_stops_the_run')
+
+
+def test_main_sends_the_newsletter_when_the_handler_fails():
+    """AE5: de echte afhandelaar met een kapotte IMAP-verbinding mag de run niet stoppen."""
+    with patch('src.replies.lg') as lg_mock:
+        calls, doubles = _run_main(real_replies=True)
+
+    assert doubles['send_newsletter'].called, 'de nieuwsbrief had gewoon uit moeten gaan'
+    assert lg_mock.error.called, 'een mislukte pass hoort een lg.error te geven'
+    print('  PASS test_main_sends_the_newsletter_when_the_handler_fails')
+
+
+# ---------------------------------------------------------------------------
 # Verzending: reconnect na een gebroken SMTP-verbinding, en eerlijk tellen
 # ---------------------------------------------------------------------------
 
@@ -1088,6 +1173,10 @@ def main():
         test_the_inbox_bounce_route_is_gone,
         test_bounce_counting_is_unchanged,
         test_marking_undeliverable_respects_a_resubscribe,
+        test_main_runs_the_handler_before_and_after_sending,
+        test_main_skips_the_handler_on_a_dry_run,
+        test_main_runs_the_first_pass_even_when_the_source_gate_stops_the_run,
+        test_main_sends_the_newsletter_when_the_handler_fails,
         test_smtp_reconnects_after_broken_connection,
         test_smtp_reports_actual_count_not_subscriber_count,
     ]
