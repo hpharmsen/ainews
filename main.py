@@ -12,7 +12,7 @@ from src.ai import generate_ai_summary, edit_articles, generate_ai_image, genera
 from src.formatter import create_html_email
 from justlog import lg, setup_logging
 from src.mailer import send_newsletter, already_sent_today
-from src.undelivered import handle_undelivered
+from src.replies import handle_replies
 
 VERBOSE = True
 MIN_SOURCE_EMAILS = 2  # minder bronmails betekent geen nieuwsbrief, maar een melding
@@ -66,6 +66,11 @@ def main():
     cleanup_cache()
     schedule, cached, dry_run = parse_command_line()
 
+    # Vóór de abonneelijst wordt opgehaald, zodat wie zich gisteren afmeldde vandaag niets
+    # meer krijgt, ook als de run daarna om een andere reden stopt.
+    if not dry_run:
+        handle_replies()
+
     if already_sent_today(schedule) and not '--resend' in sys.argv:
         lg.info(f"Newsletter '{schedule}' already sent today. Skipping.")
         return
@@ -117,8 +122,9 @@ def main():
         lg.info('Dry run: newsletter generated but not sent')
         return
     send_newsletter(schedule, html_mail, title)
+    # De migadu-bounce kwam 9 seconden na verzending binnen, dus een tweede pass is de moeite.
     time.sleep(60)
-    handle_undelivered()
+    handle_replies()
 
 
 if __name__ == '__main__':
