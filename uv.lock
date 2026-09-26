@@ -32,7 +32,7 @@ requires-dist = [
     { name = "boto3" },
     { name = "html2text", specifier = "==2025.4.15" },
     { name = "httpx" },
-    { name = "justai", specifier = ">=5.5.0" },
+    { name = "justai", specifier = ">=5.7.1" },
     { name = "justdays" },
     { name = "justlog", git = "https://github.com/hpharmsen/justlog.git?rev=0.9.0" },
     { name = "psycopg2-binary" },
@@ -756,7 +756,7 @@ wheels = [
 
 [[package]]
 name = "justai"
-version = "5.5.7"
+version = "5.7.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "absl-py" },
@@ -775,9 +775,9 @@ dependencies = [
     { name = "rich" },
     { name = "tiktoken" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f4/26/3a2803b22da43c88a8b96722a42c2717a82ead24f8fdd86a2010cd81e9bc/justai-5.5.7.tar.gz", hash = "sha256:1199e504da88a8a107ed94e43492d78db17c1cb82c5c8c1faed4f8648d30459e", size = 272713, upload-time = "2026-05-27T18:21:11.494Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/07/d1/483fe4224960b471fbcaa36a377f1ec82890a8c414d84aa353d251156498/justai-5.7.1.tar.gz", hash = "sha256:bbf70f196de177567b6418f364e09908e0b3a93fc43526d96d48d4ccf4c7499c", size = 389635, upload-time = "2026-09-26T15:50:00.01Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/86/34/9e66db3c3e156c842670c10ee5e81b0f2e75405983b3f4974af3e0b56e00/justai-5.5.7-py3-none-any.whl", hash = "sha256:a194d799d5dcabb3e36242131965defb283464bfb1f550b9b53a5bb80b1f7eb6", size = 58773, upload-time = "2026-05-27T18:21:09.907Z" },
+    { url = "https://files.pythonhosted.org/packages/78/c4/f6d8eacdbaea80f7b5c3985878dea557c8e1fabf1480e9c025dae9df2cce/justai-5.7.1-py3-none-any.whl", hash = "sha256:5642d2d32161c85dfd73a16b5dae10b7c3ae047a9ef65f54e248332153a3bee4", size = 75276, upload-time = "2026-09-26T15:49:58.337Z" },
 ]
 
 [[package]]

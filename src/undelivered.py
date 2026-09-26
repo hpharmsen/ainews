@@ -2,12 +2,9 @@
 
 import json
 from pathlib import Path
-from dotenv import load_dotenv
 from justdays import Day
 
-from src.gmail import Mail
 from justlog import lg
-from src.mailer import delete_email
 from src.subscribers import update_subscription, get_subscriber_status
 
 undelivered_file = Path(__file__).parent.parent / 'data' / 'undelivered.json'
@@ -68,24 +65,6 @@ def cleanup_stale_entries(data: dict[str, dict]) -> dict[str, dict]:
     return cleaned
 
 
-def get_mail():
-    mail = Mail()
-    if not mail.connect():
-        lg.error('Failed to connect to email server')
-        exit(1)
-    return mail
-
-
-def get_undelivered_emails(mail: Mail) -> list[dict[str, str]]:
-    lg.info('Retrieving undelivered emails...')
-    undelivered_emails = mail.get_undelivered()
-    if not undelivered_emails:
-        lg.info('No undelivered emails found')
-        exit(0)
-    lg.info(f'Found {len(undelivered_emails)} undelivered emails')
-    return undelivered_emails
-
-
 def parse_undelivered_emails(undelivered_emails):
     undelivered_data = load_undelivered_data()
     undelivered_data = cleanup_stale_entries(undelivered_data)
@@ -133,14 +112,6 @@ def parse_undelivered_emails(undelivered_emails):
     return emails_to_delete, emails_to_mark_undeliverable
 
 
-def delete_emails(emails_to_delete):
-    deleted_count = 0
-    for email_id in emails_to_delete:
-        if delete_email(email_id, folder='INBOX'):
-            deleted_count += 1
-    lg.info(f'Deleted {deleted_count}/{len(emails_to_delete)} undelivered emails')
-
-
 def mark_undeliverable(emails_to_mark_undeliverable):
     marked = 0
     for email_address in emails_to_mark_undeliverable:
@@ -157,21 +128,3 @@ def mark_undeliverable(emails_to_mark_undeliverable):
         update_subscription(email_address, 'undeliverable')
         marked += 1
     lg.info(f'{marked} emails marked as undeliverable\n')
-
-
-def handle_undelivered():
-    mail = get_mail()
-    try:
-        undelivered_emails = get_undelivered_emails(mail)
-        emails_to_delete, emails_to_mark_undeliverable = parse_undelivered_emails(undelivered_emails)
-        delete_emails(emails_to_delete)
-        mark_undeliverable(emails_to_mark_undeliverable)
-    except Exception as e:
-        lg.error(f'Error processing undelivered emails - {e}\n')
-    finally:
-        mail.close()
-
-
-if __name__ == '__main__':
-    load_dotenv()
-    handle_undelivered()

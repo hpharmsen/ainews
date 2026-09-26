@@ -209,6 +209,17 @@ class Mail:
         except Exception:
             return None
 
+    def get_message(self, email_uid):
+        """De volledige mail als geparst message-object, of None."""
+        try:
+            status, msg_data = self.mail.uid('fetch', email_uid, '(RFC822)')
+            if status != 'OK' or not msg_data or not isinstance(msg_data[0], tuple):
+                return None
+            return email.message_from_bytes(msg_data[0][1])
+        except Exception as e:
+            lg.error(f"Error fetching message {email_uid}: {str(e)}")
+            return None
+
     def get_email_body(self, email_uid):
         """
         Get the email body for a given email UID, as text with the source links intact.
@@ -223,13 +234,10 @@ class Mail:
         Returns:
             str: The email body text or None if not found
         """
+        msg = self.get_message(email_uid)
+        if msg is None:
+            return None
         try:
-            status, msg_data = self.mail.uid('fetch', email_uid, '(RFC822)')
-            if status != 'OK' or not msg_data or not isinstance(msg_data[0], tuple):
-                return None
-
-            msg = email.message_from_bytes(msg_data[0][1])
-
             plain = html = None
             for part in msg.walk():  # Ook bij niet-multipart levert dit het bericht zelf
                 if 'attachment' in str(part.get('Content-Disposition')):
@@ -255,56 +263,6 @@ class Mail:
         except Exception as e:
             lg.error(f"Error getting email body: {str(e)}")
             return None
-
-    def get_undelivered(self) -> list[dict[str, str]]:
-        """
-        Get undelivered emails from Mail Delivery Subsystem.
-
-        Returns:
-            List of dicts with 'email_id' and 'recipient_email' keys
-        """
-        try:
-            if not self.mail:
-                if not self.connect():
-                    lg.error('Failed to connect to IMAP server')
-                    return []
-
-            # Select inbox
-            status, _ = self.mail.select('INBOX', readonly=True)
-            if status != 'OK':
-                lg.error('Failed to access INBOX')
-                return []
-
-            # Search for emails from Mail Delivery Subsystem or Mail Delivery System
-            status, email_uids = self.mail.uid('search', None, '(OR (FROM "Mail Delivery Subsystem") (FROM "Mail Delivery System"))')
-            if status != 'OK' or not email_uids or not email_uids[0]:
-                return []
-
-            undelivered_emails = []
-
-            for email_uid in email_uids[0].split():
-                # Get the full email message
-                status, msg_data = self.mail.uid('fetch', email_uid, '(RFC822)')
-                if status != 'OK' or not msg_data or not isinstance(msg_data[0], tuple):
-                    continue
-
-                msg = email.message_from_bytes(msg_data[0][1])
-
-                # Extract the original recipient from the bounce message
-                recipient_info = self._extract_original_recipient(msg)
-                if recipient_info and recipient_info.get('recipient_email'):
-                    undelivered_emails.append({
-                        'email_id': email_uid.decode('utf-8'),
-                        'recipient_email': recipient_info['recipient_email'],
-                        'is_spam_rejection': recipient_info.get('is_spam_rejection', False),
-                        'is_permanent': recipient_info.get('is_permanent', False)
-                    })
-
-            return undelivered_emails
-
-        except Exception as e:
-            lg.error(f'Error getting undelivered emails: {str(e)}')
-            return []
 
     def _extract_original_recipient(self, msg) -> dict | None:
         """
