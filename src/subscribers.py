@@ -48,17 +48,17 @@ def get_subscribers(status: str) -> List[str]:
 
 
 def get_subscriber_status(email: str) -> dict | None:
-    """Get subscriber status and updated_at timestamp."""
-    try:
-        with db() as (conn, tables):
-            t = tables['nieuwsbrief_subscriber']
-            query = select(t.c.status, t.c.updated_at).where(t.c.email == email)
-            row = conn.execute(query).fetchone()
-            if row:
-                return {'status': row[0], 'updated_at': row[1]}
-    except Exception as e:
-        lg.error(f'Error getting subscriber status for {email}: {e}')
-    return None
+    """Get subscriber status and updated_at timestamp. None betekent: geen rij gevonden.
+
+    Databasefouten gaan naar de aanroeper. Ze hier slikken zou None opleveren, hetzelfde
+    antwoord als voor een onbekend adres, en dan verdwijnt een afmelding stil in de
+    prullenbak zonder dat er iemand wordt uitgeschreven.
+    """
+    with db() as (conn, tables):
+        t = tables['nieuwsbrief_subscriber']
+        query = select(t.c.status, t.c.updated_at).where(t.c.email == email)
+        row = conn.execute(query).fetchone()
+        return {'status': row[0], 'updated_at': row[1]} if row else None
 
 
 def update_subscription(email: str, status: str) -> bool:
