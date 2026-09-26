@@ -179,7 +179,9 @@ def handle_replies() -> None:
                 continue
             body = message_text(msg)
             subject = decode_email_header(msg.get('Subject', '')).strip()
-            handled += act_on(mail, uid, sender, classify_reply(sender, subject, body), msg, body)
+            category = classify_reply(sender, subject, body)
+            if act_on(mail, uid, sender, category, msg, body):
+                handled += 1
         save_last_pass(started)
         lg.info(f'Label {LABEL}: {handled} van {len(uids)} berichten afgehandeld')
     except Exception as e:
