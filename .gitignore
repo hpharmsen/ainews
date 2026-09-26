@@ -5,6 +5,8 @@
 /data/mailerlog.txt
 /data/app.log
 /data/undelivered.json
+/data/replies_seen.json
+/data/replieslog.txt
 /summary.jsonl
 /summary.md
 .DS_Store
