@@ -4,11 +4,14 @@ import imaplib
 import email
 import email.header
 import json
+import re
 import time
 from datetime import datetime, timezone, timedelta
 from email.utils import parseaddr, parsedate_to_datetime
 from email.header import decode_header
 from pathlib import Path
+
+import html2text
 
 from src.database import cache_file_prefix
 from justlog import lg
@@ -18,12 +21,30 @@ LAST_SENT_FILE = Path(__file__).parent.parent / 'data' / 'last_sent.json'
 # Ondergrens voor het ophaalvenster. Zonder deze klem verkleint een late vorige run
 # het venster van de volgende, en dan blijft er te weinig nieuws over.
 MIN_LOOKBACK = {'daily': timedelta(days=1), 'weekly': timedelta(weeks=1)}
-MAX_LEN_PER_MAIL = 2000
-MAX_TOTAL_LEN = 10_000
+# De kop van een nieuwsbrief is menubalk plus advertentieblok; het nieuws met de bronlinks
+# staat daaronder. Bij 2000 tekens per mail bleef alleen die kop over en had het model geen
+# enkele URL om uit te kiezen.
+MAX_LEN_PER_MAIL = 8000
+MAX_TOTAL_LEN = 50_000
+# Onder deze grens is de plaintext-variant een uitgeklede versie zonder bronlinks
+# (AlphaSignal levert 1 URL in 8400 tekens) en is de HTML-versie de enige bron van links.
+MIN_URLS_IN_PLAIN = 3
+URL_PATTERN = re.compile(r'https?://')
 # SELECTED_SENDERS = [
 # 'aitidbits+ai-coding@substack.com',
 # 'aiminds@mail.beehiiv.com'
 # ]
+
+
+def html_to_text(html: str) -> str:
+    """Zet een HTML-mail om naar tekst met de links als markdown erin."""
+    converter = html2text.HTML2Text()
+    converter.body_width = 0  # Geen harde regelafbrekingen middenin een URL
+    converter.ignore_images = True
+    converter.ignore_emphasis = True
+    converter.ignore_tables = True
+    return converter.handle(html)
+
 
 class Mail:
     def __init__(self):
@@ -190,7 +211,11 @@ class Mail:
 
     def get_email_body(self, email_uid):
         """
-        Get the email body for a given email UID.
+        Get the email body for a given email UID, as text with the source links intact.
+
+        Plaintext heeft de voorkeur: die is compacter en bij de meeste nieuwsbrieven staan
+        de links er als markdown in. Levert een afzender een plaintext-variant zonder links,
+        dan is de HTML-versie de enige plek waar de bronnen nog staan.
 
         Args:
             email_uid: The UID of the email to retrieve
@@ -202,30 +227,31 @@ class Mail:
             status, msg_data = self.mail.uid('fetch', email_uid, '(RFC822)')
             if status != 'OK' or not msg_data or not isinstance(msg_data[0], tuple):
                 return None
-                
+
             msg = email.message_from_bytes(msg_data[0][1])
-            
-            # Walk through the email parts to find the text/plain or text/html part
-            body = None
-            if msg.is_multipart():
-                for part in msg.walk():
-                    content_type = part.get_content_type()
-                    content_disposition = str(part.get('Content-Disposition'))
-                    
-                    # Skip any text/plain (txt) attachments
-                    if 'attachment' not in content_disposition:
-                        if content_type == 'text/plain':
-                            body = part.get_payload(decode=True).decode('utf-8', errors='ignore')
-                            break
-                        elif content_type == 'text/html' and body is None:
-                            # Use HTML as fallback if no plain text version is available
-                            body = part.get_payload(decode=True).decode('utf-8', errors='ignore')
-            else:
-                # Not multipart - just get the payload
-                body = msg.get_payload(decode=True).decode('utf-8', errors='ignore')
-                
-            return body
-            
+
+            plain = html = None
+            for part in msg.walk():  # Ook bij niet-multipart levert dit het bericht zelf
+                if 'attachment' in str(part.get('Content-Disposition')):
+                    continue
+                content_type = part.get_content_type()
+                if content_type not in ('text/plain', 'text/html'):
+                    continue
+                payload = part.get_payload(decode=True)
+                if not payload:
+                    continue
+                text = payload.decode('utf-8', errors='ignore')
+                if content_type == 'text/plain' and plain is None:
+                    plain = text
+                elif content_type == 'text/html' and html is None:
+                    html = text
+
+            if plain and len(URL_PATTERN.findall(plain)) >= MIN_URLS_IN_PLAIN:
+                return plain
+            if html:
+                return html_to_text(html)
+            return plain
+
         except Exception as e:
             lg.error(f"Error getting email body: {str(e)}")
             return None

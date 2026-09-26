@@ -12,4 +12,5 @@ dependencies = [
     'psycopg2-binary',
     'boto3',
     'httpx',
+    'html2text==2025.4.15',
 ]

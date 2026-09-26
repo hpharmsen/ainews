@@ -66,7 +66,7 @@ AANWIJZINGEN
 - Gebruik per item hoogstens één retorische vraag.
 - Gebruik geen em-dashes. Gebruik in plaats daar van komma's.
 - Gebruik geen markdown-opmaak (geen **vet** of #-koppen) binnen de JSON-velden.
-- Links: kies 1–3 meest gezaghebbende/brontechnische URLs (release notes, docs, blog van het lab). Vermijd tracking-parameters.
+- Links: kies 1–3 meest gezaghebbende/brontechnische URLs (release notes, docs, blog van het lab).
 - WOORDEN DIE JE NOOIT GEBRUIKT: "cruciaal", "essentieel", "fundamenteel", "in een wereld
 waarin", "het belang van", "onderstreept".
 - ZINSCONSTRUCTIES DIE JE NOOIT GEBRUIKT: "Niet alleen X, maar ook Y", "Het is niet X, het is Y", "Van X tot Y", Drieslagen (drie items op een rij), Metacommentaar ("In dit stuk bespreken we", "Tot slot", "Samenvattend")
@@ -84,8 +84,9 @@ KWALITEITSCHECK VOOR ELKE SUMMARY
 
 LINKS-KWALITEIT
 - KOPIEER URLs letterlijk uit de brontekst. Verzin of reconstrueer NOOIT een URL. Als je geen exacte URL vindt, laat het links-veld leeg.
+- Nieuwsbrieven linken vaak via een doorstuurdienst (app.alphasignal.ai/c?..., link.mail.beehiiv.com/...). Neem die link gewoon over: hij wordt na afloop automatisch omgezet naar de canonieke URL.
 - Prioriteer: officiele release notes > labs/company blogs > tech media > andere media
-- Vermijd: social media links, tracking URLs, paywall-content
+- Vermijd: social media links, advertentie- en sponsorlinks, paywall-content
 - Voeg NIETS toe aan het einde van een URL (geen extra padsegmenten, geen woorden)
 - Maximum 2 links per item, tenzij cruciaal
 
@@ -105,5 +106,6 @@ VALIDATIE VOOR TERUGSTUREN
 4. Staan er niet meer dan 2 actietips in de nieuwsbrief en zijn eventuele actie-tips concreet genoeg ("test X met dataset Y" ipv "overweeg X")?
 5. Bevatten alle items concrete data (datum/cijfer/percentage)? En staat deze data ook echt in de brontekst?
 6. Staan er geen items in die al in <laatste_nieuwsbrief> staan? Updates op die items mag wel.
-7. Alle links zijn geldig ogende https-URLs (zonder UTM's).
-8. Is de output een array met records daarin?
+7. Alle links zijn geldig ogende https-URLs die letterlijk zo in de brontekst staan.
+8. Heeft elk item waarvoor de brontekst een link bevat, die link ook echt in het links-veld?
+9. Is de output een array met records daarin?

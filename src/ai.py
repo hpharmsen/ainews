@@ -3,6 +3,7 @@ import time
 from pathlib import Path
 import os
 from typing import Tuple
+from urllib.parse import parse_qs, urlparse, urlunparse
 
 import httpx
 from justai import Model
@@ -86,6 +87,9 @@ def check_publishable(articles: list[dict]) -> str | None:
     return None
 
 
+# Queryparameters waarmee een nieuwsbrief de individuele abonnee herkent.
+PERSONAL_QUERY_PARAMS = {'uid', 'lid', 'mid', 'cid', 'email', 'subscriber_id'}
+
 _BROWSER_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
 }
@@ -113,13 +117,18 @@ def _try_url(url: str) -> str | None:
         return None
 
 
+def has_personal_tracking(url: str) -> bool:
+    """True als de URL de abonnee identificeert. Doorstuurlinks uit een nieuwsbrief dragen
+    het abonneenummer van HP mee; die mag niet doorgegeven worden aan de lezers."""
+    return bool(PERSONAL_QUERY_PARAMS & parse_qs(urlparse(url).query).keys())
+
+
 def check_and_resolve_url(url: str) -> str | None:
     """Returns a valid URL (possibly redirected), tries trimming path segments if needed."""
     resolved = _try_url(url)
     if resolved:
         return resolved
     # Try removing trailing path segments one at a time
-    from urllib.parse import urlparse, urlunparse
     parsed = urlparse(url)
     path = parsed.path.rstrip('/')
     while '/' in path:
@@ -182,6 +191,9 @@ def generate_ai_summary(schedule: str, text: str, verbose=False, cached=True):
             resolved = check_and_resolve_url(str(link))
             if resolved is None:
                 lg.warning(f'Link {link} is not valid')
+                article.links.remove(link)
+            elif has_personal_tracking(resolved):
+                lg.warning(f'Link {resolved} bevat abonnee-tracking, verwijderd')
                 article.links.remove(link)
             elif resolved != str(link):
                 lg.info(f'Redirected {link} -> {resolved}')

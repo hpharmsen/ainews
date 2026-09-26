@@ -350,6 +350,70 @@ def test_lookback_falls_back_when_file_missing():
 
 
 # ---------------------------------------------------------------------------
+# Bronlinks: de nieuwsbrief van 8 september bevatte er nul
+# ---------------------------------------------------------------------------
+
+def _mail_with_parts(plain: str, html: str):
+    """Een Mail met een gemockte IMAP-verbinding die deze ene mail teruggeeft."""
+    from email.message import EmailMessage
+    from src.gmail import Mail
+
+    msg = EmailMessage()
+    msg['Subject'] = 'Nieuwsbrief'
+    msg.set_content(plain)
+    msg.add_alternative(html, subtype='html')
+
+    mail = Mail()
+    mail.mail = MagicMock()
+    mail.mail.uid.return_value = ('OK', [(b'1 (RFC822', msg.as_bytes())])
+    return mail
+
+
+def test_body_falls_back_to_html_when_plaintext_has_no_links():
+    """AlphaSignal levert een plaintext-variant zonder bronlinks. Dan moet de HTML gebruikt."""
+    plain = 'Top News\nClaude verifieert Fermat in 13M regels\nDeepMind swarm splitst zich'
+    html = '<p><a href="https://app.alphasignal.ai/c?uid=abc">Claude verifieert Fermat</a></p>'
+
+    body = _mail_with_parts(plain, html).get_email_body('1')
+
+    assert 'https://app.alphasignal.ai/c?uid=abc' in body, f'link ontbreekt in body: {body!r}'
+    print('  PASS test_body_falls_back_to_html_when_plaintext_has_no_links')
+
+
+def test_body_prefers_plaintext_when_it_has_links():
+    """Beehiiv-bronnen leveren markdown met links; die compacte versie houden we."""
+    plain = ('[Item een](https://example.com/1)\n'
+             '[Item twee](https://example.com/2)\n'
+             '[Item drie](https://example.com/3)')
+    html = '<p><a href="https://example.com/anders">Iets anders</a></p>'
+
+    body = _mail_with_parts(plain, html).get_email_body('1')
+
+    assert body == plain + '\n', f'plaintext verwacht, kreeg: {body!r}'
+    print('  PASS test_body_prefers_plaintext_when_it_has_links')
+
+
+def test_body_cap_keeps_the_news_not_just_the_ad_header():
+    """2000 tekens hield alleen de menubalk en het advertentieblok over."""
+    from src import gmail
+
+    assert gmail.MAX_LEN_PER_MAIL >= 8000, f'cap {gmail.MAX_LEN_PER_MAIL} knipt het nieuws eraf'
+    assert gmail.MAX_TOTAL_LEN >= gmail.MAX_LEN_PER_MAIL * 5, 'te weinig ruimte voor vijf bronnen'
+    print('  PASS test_body_cap_keeps_the_news_not_just_the_ad_header')
+
+
+def test_personal_tracking_links_are_recognized():
+    """Een doorstuurlink draagt HP's abonneenummer mee en mag de nieuwsbrief niet in."""
+    from src.ai import has_personal_tracking
+
+    assert has_personal_tracking('https://app.alphasignal.ai/c?uid=2eAy&lid=1u7O')
+    assert has_personal_tracking('https://recs.page/offers?lc=x&email=hp@harmsen.nl')
+    assert not has_personal_tracking('https://www.anthropic.com/research/fermat')
+    assert not has_personal_tracking('https://example.com/post?utm_source=news')
+    print('  PASS test_personal_tracking_links_are_recognized')
+
+
+# ---------------------------------------------------------------------------
 # Verzending: reconnect na een gebroken SMTP-verbinding, en eerlijk tellen
 # ---------------------------------------------------------------------------
 
@@ -441,6 +505,10 @@ def main():
         test_lookback_uses_last_sent_when_older_than_floor,
         test_lookback_weekly_floor_is_a_week,
         test_lookback_falls_back_when_file_missing,
+        test_body_falls_back_to_html_when_plaintext_has_no_links,
+        test_body_prefers_plaintext_when_it_has_links,
+        test_body_cap_keeps_the_news_not_just_the_ad_header,
+        test_personal_tracking_links_are_recognized,
         test_smtp_reconnects_after_broken_connection,
         test_smtp_reports_actual_count_not_subscriber_count,
     ]
