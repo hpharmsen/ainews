@@ -26,6 +26,9 @@ INFOGRAPHIC_MODEL = 'gemini-3.1-flash-image-preview'
 INFOGRAPHIC_MODEL_NAME = 'Nano Banana 2'
 EDITOR_MODEL = 'claude-opus-4-7'
 EDITOR_MODEL_NAME = 'Claude Opus 4.7'
+# System One model: geen tekstgeneratie maar een gekalibreerde kans per categorie,
+# in tienden van een seconde. jev-router werkt niet op /v1/systemone, jev-1.13 wel.
+CLASSIFY_MODEL = 'openrouter/typesafe/jev-1.13'
 
 PROMPTS_DIR = Path(__file__).parent / 'prompts'
 COLORS = ['rood', 'groen', 'grijs', 'bruin', 'oranje', 'paars', 'blauw']
@@ -414,6 +417,45 @@ def select_articles_for_visuals(articles: list[dict]) -> dict:
 
     model = Model(SELECTION_MODEL)
     return retry_prompt(model, prompt)
+
+
+# De vier categorieen voor post op het nieuwsbriefadres. De omschrijvingen zijn wat het
+# model te zien krijgt, dus ze staan hier en niet in een comment.
+REPLY_CATEGORIES = {
+    'afmelding': 'De afzender wil de nieuwsbrief niet meer ontvangen. Ook een machinale '
+                 'one-click afmelding van een mailprogramma valt hieronder.',
+    'delay': 'Een automatische melding van een mailserver dat bezorging vertraagd is en nog '
+             'opnieuw wordt geprobeerd. Nog geen definitieve mislukking.',
+    'bounce': 'Een automatische melding van een mailserver dat bezorging definitief is mislukt.',
+    'hp': 'Iets waar een mens naar moet kijken: een inhoudelijke lezersreactie, een vraag, een '
+          'klacht dat de nieuwsbrief niet aankomt, of iets dat in geen van de andere '
+          'categorieen past.',
+}
+
+CLASSIFY_INSTRUCTIONS = (
+    'Dit is post die binnenkwam op het adres van een nieuwsbrief. Welke categorie is het? '
+    'Kies hp zodra je twijfelt. Een klacht dat de nieuwsbrief niet meer aankomt is geen '
+    'afmelding maar hp: die lezer wil hem juist wel ontvangen.'
+)
+
+# Onder deze confidence wordt het hp. Een onterechte uitschrijving is niet terug te draaien,
+# een mail die blijft staan kost alleen aandacht.
+MIN_CONFIDENCE = 0.90
+# Genoeg voor een lezersreactie. Wie de hele nieuwsbrief mee terugstuurt voegt daarna niets toe.
+MAX_REPLY_BODY = 2000
+
+
+def classify_reply(sender: str, subject: str, body: str | None) -> str:
+    """Kies een van REPLY_CATEGORIES voor een binnengekomen mail. Bij twijfel hp."""
+    state = f'Van: {sender}\nOnderwerp: {subject}\n\n{(body or "")[:MAX_REPLY_BODY]}'
+    answer = Model(CLASSIFY_MODEL).classify(
+        state, REPLY_CATEGORIES, instructions=CLASSIFY_INSTRUCTIONS, cached=False
+    )
+    if answer['confidence'] < MIN_CONFIDENCE:
+        lg.info(f'{sender}: {answer["choice"]} met confidence '
+                f'{answer["confidence"]:.2f}, onder de drempel dus hp')
+        return 'hp'
+    return answer['choice']
 
 
 def retry_prompt(model, prompt, return_json: bool = True):
