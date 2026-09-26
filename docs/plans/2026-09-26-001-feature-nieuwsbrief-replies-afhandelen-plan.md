@@ -13,10 +13,10 @@ execution: code
 ## Goal Capsule
 
 - **Objective:** Wie zich afmeldt op de nieuwsbrief is daarna ook echt afgemeld, bouncende adressen worden weer geteld, en in het Gmail-label `nieuwsbrief` staat alleen nog post waar HP zelf iets mee moet.
-- **Means:** Een afhandelaar leest het label, laat elk binnengekomen bericht door een LLM in vier categorieën indelen en maakt afmeldingen, delay-meldingen en harde bounces zelf af (KTD1).
+- **Means:** Een afhandelaar leest het label, laat elk binnengekomen bericht door een System One classifier in vier categorieën indelen en maakt afmeldingen, delay-meldingen en harde bounces zelf af (KTD1).
 - **Authority:** Het requirementsdocument in `origin:` bepaalt het gedrag. Waar dit plan een aanname daaruit corrigeert, staat dat als feit bij de betrokken R.
 - **Stop conditions:** De afhandelaar breekt de nieuwsbrief-run nooit af (R15). Twijfel over een categorie leidt nooit tot een uitschrijving of een verwijdering (R5).
-- **Execution profile:** Test-first op de classificatie- en actielogica; de IMAP- en LLM-koppeling wordt met mocks bewezen, zoals de bestaande tests in `tests/main.py` dat doen.
+- **Execution profile:** Test-first op de classificatie- en actielogica; de IMAP- en modelkoppeling wordt met mocks bewezen, zoals de bestaande tests in `tests/main.py` dat doen.
 
 ---
 
@@ -24,11 +24,11 @@ execution: code
 
 ### Summary
 
-Een nieuw module `src/replies.py` wordt de enige verwerker van het Gmail-label `nieuwsbrief`. Hij classificeert elk binnengekomen bericht met een LLM, voert per categorie de afhandeling uit, schrijft één logregel per behandeld bericht en draait twee keer per nieuwsbrief-run. De bestaande bounceafhandeling verhuist van INBOX naar het label; de oude INBOX-ingang verdwijnt in plaats van ernaast te blijven staan.
+Een nieuw module `src/replies.py` wordt de enige verwerker van het Gmail-label `nieuwsbrief`. Hij classificeert elk binnengekomen bericht met een System One model, voert per categorie de afhandeling uit, schrijft één logregel per behandeld bericht en draait twee keer per nieuwsbrief-run. De bestaande bounceafhandeling verhuist van INBOX naar het label; de oude INBOX-ingang verdwijnt in plaats van ernaast te blijven staan.
 
 ### Problem Frame
 
-Het label `nieuwsbrief` bevat op 26 september 2026 vijftien berichten uit vijf kwartalen, en die zijn van drie soorten. Er zitten echte lezersreacties in, er zit machinale post in (een Apple Mail one-click afmelding, een Gmail delay-melding, een harde bounce van migadu) en er staan HP's eigen verzonden nieuwsbrieven en antwoorden tussen, omdat het Gmail-filter hele threads labelt. De machinale post kost aandacht die hij niet waard is.
+Het label `nieuwsbrief` bevat op 26 september 2026 vijftien berichten uit vier kwartalen, en die zijn van drie soorten. Er zitten echte lezersreacties in, er zit machinale post in (een Apple Mail one-click afmelding, een Gmail delay-melding, een harde bounce van migadu) en er staan HP's eigen verzonden nieuwsbrieven en antwoorden tussen, omdat het Gmail-filter hele threads labelt. De machinale post kost aandacht die hij niet waard is.
 
 Tegelijk is er een stil gat. `src/undelivered.py` telt bounces en zet abonnees op `undeliverable`, maar `Mail.get_undelivered()` selecteert `INBOX` terwijl het Gmail-filter deze mail juist uit INBOX haalt. De bouncetelling draait dus leeg. De migadu-bounce van 3 oktober 2025 staat nog ongeteld in het label.
 
@@ -36,7 +36,7 @@ De afmelding heeft hetzelfde gat. De Apple Mail one-click afmelding van 23 septe
 
 ### Key Decisions
 
-- Een LLM classificeert, geen trefwoordenlijst. Trefwoorden missen "haal me van de lijst" en pakken juist "ik ontvang de nieuwsbrief niet meer" verkeerd op. Governs R4, R5.
+- Een model classificeert, geen trefwoordenlijst. Trefwoorden missen "haal me van de lijst" en pakken juist "ik ontvang de nieuwsbrief niet meer" verkeerd op. Het model is een System One classifier, die geen tekst genereert maar per categorie een gekalibreerde kans teruggeeft. Governs R4, R5.
 - De afhandelaar wordt de enige verwerker van het label, inclusief de bounces. De bestaande bounceafhandeling landt nergens meer; die verhuist mee in plaats van er een tweede ingang naast te zetten. Governs R1, R9.
 - Een afmelding van een onbekend adres verdwijnt zonder melding. Er valt niets uit te schrijven en het gebeurt zelden genoeg om geen alarm waard te zijn. Governs R8.
 - Een tijdstempel in `data/` bepaalt wat al bekeken is. Zonder dat zou dezelfde lezersvraag elke run opnieuw een gok krijgen, en één keer misgokken is genoeg. Governs R3.
@@ -61,7 +61,7 @@ De afmelding heeft hetzelfde gat. De Apple Mail one-click afmelding van 23 septe
 **Classificatie**
 
 - R4. Elk bericht krijgt precies één categorie: `afmelding`, `delay`, `bounce`, of `hp`.
-- R5. Bij onvoldoende zekerheid kiest de afhandelaar `hp`. Twijfel leidt nooit tot een uitschrijving of een verwijdering.
+- R5. Bij een confidence onder `MIN_CONFIDENCE` (0.90) wordt de categorie `hp`, wat het model ook koos. Twijfel leidt nooit tot een uitschrijving of een verwijdering.
 
 **Afhandeling per categorie**
 
@@ -131,17 +131,18 @@ Geen. De vijf vragen die het requirementsdocument naar het plannen doorschoof zi
 
 ### Key Technical Decisions
 
-- KTD1. **Classificatie met `COPY_WRITE_MODEL` (Claude Sonnet 4.6) en een pydantic `response_format`.** Instantieert de Key Decision die R4 en R5 bestuurt. De categorie is een enum-veld; de zekerheidsdrempel uit R5 is een promptregel ("kies `hp` zodra je twijfelt"), geen numerieke score, want een model-score is niet gekalibreerd en zou een tweede drempel introduceren die niemand kan afstellen. Volume is een handvol berichten per dag, dus de prijs van Sonnet boven Haiku is verwaarloosbaar tegenover de kosten van een onterechte uitschrijving.
-- KTD2. **`retry_prompt()` in `src/ai.py` krijgt een optionele `response_format`.** De bestaande retry-helper dekt al precies het gedrag dat R15 vraagt: `lg.warning` per poging, doorgooien na de laatste. Een derde handgeschreven retry-lus ernaast zou datzelfde gedrag een derde keer kopiëren.
+- KTD1. **Classificatie met `Model.classify()` op `openrouter/typesafe/jev-1.13`, een System One model.** Instantieert de Key Decision die R4 en R5 bestuurt. Zo'n model genereert geen tekst: het leest een toestand, kiest uit een dict van categorieën en geeft per categorie een gekalibreerde kans plus een confidence terug. Dat maakt de zekerheidsdrempel uit R5 een getal in plaats van een promptregel, want deze kansen zijn wél gekalibreerd. Antwoordtijd is 260 tot 660 ms tegen 403 in- en 49 uit-tokens, dus een pass over het hele label kost minder dan één artikel eindredactie.
+- KTD2. **Geen prompt-bestand en geen wijziging aan `retry_prompt()`.** De vier categorieën met hun omschrijving zijn de `options`-dict, en de twijfelregel staat in `instructions`; er valt niets te templaten met `load_prompt()`. `classify()` is geen `prompt()`-aanroep, dus de helper waar de hele nieuwsbriefpijplijn op leunt blijft onaangeraakt. `classify()` retryt zelf tweemaal op 429 en 529 en vertaalt HTTP-fouten naar dezelfde justai-excepties; de buitenste `try`/`except` van de afhandelaar dekt R15.
 - KTD3. **Eigen logbestand `data/replieslog.txt`, tab-gescheiden.** `mailerlog.txt` heeft een vast drieveldenformaat dat `already_sent_today()` en `get_mailerlog()` met `split()` uit elkaar trekken; er mailtekst bij schuiven maakt die parsers stil onbetrouwbaar. Tabs omdat het laatste veld vrije tekst met spaties is.
 - KTD4. **Eén tijdstempel voor beide passes, in `data/replies_seen.json`.** De passes doen hetzelfde werk op dezelfde bron; twee tijdstempels zouden alleen maar uit elkaar kunnen lopen. Het tijdstempel is het moment waarop de pass begon, niet het moment waarop hij klaar was, zodat post die tijdens de pass binnenkomt de volgende keer alsnog wordt gezien.
 - KTD5. **`get_subscriber_status()` gooit databasefouten door in plaats van ze te slikken.** Nu logt de functie `lg.error` en geeft `None` terug, precies hetzelfde antwoord als voor een adres dat niet bestaat. Onder R7 en R8 zou een databasestoring dan elke afmelding stil in de prullenbak gooien zonder uit te schrijven. Met doorgooien wordt het een mislukte pass: het tijdstempel schuift niet op en de volgende run doet het werk over.
 - KTD6. **Uitschrijven alleen na een geslaagde lookup, nooit blind.** `update_subscription()` logt `lg.error` als er geen rij wordt geraakt. Blind aanroepen bij een onbekend adres zou dus een Janitor-issue opleveren bij precies het geval dat volgens R8 stil moet verlopen.
 - KTD7. **De bounce-ingang op INBOX verdwijnt.** `Mail.get_undelivered()` en de functies `get_mail()`, `get_undelivered_emails()`, `delete_emails()` en `handle_undelivered()` in `src/undelivered.py` worden verwijderd. Ze bevatten de `exit(0)` en `exit(1)` die R15 onmogelijk maken, en ze zoeken op een plek waar de post niet meer komt. De telfuncties `parse_undelivered_emails()` en `mark_undeliverable()` blijven ongewijzigd, zodat R9 letterlijk waar blijft.
+- KTD8. **`justai` gaat van `>=5.5.0` naar `>=5.7.1`.** `Model.classify()` bestaat pas in 5.7.1. De rest van de API is onveranderd: `prompt()`, `chat()` en `generate_image()` houden hun signature en de excepties die `src/ai.py` importeert bestaan nog. `OPENROUTER_API_KEY` staat al in `.env` en in productie; een `TYPESAFE_API_KEY` is niet nodig omdat de route via OpenRouter loopt.
 
 ### High-Level Technical Design
 
-De afhandelaar is één pass over één IMAP-folder. De volgorde binnen die pass is wat de garanties draagt: filteren is goedkoop en gebeurt vóór de LLM, en het verwijderen gaat vooraf aan het tellen zodat een mislukte verwijdering niet tot dubbeltellen leidt.
+De afhandelaar is één pass over één IMAP-folder. De volgorde binnen die pass is wat de garanties draagt: filteren is goedkoop en gebeurt vóór het model, en het verwijderen gaat vooraf aan het tellen zodat een mislukte verwijdering niet tot dubbeltellen leidt.
 
 ```mermaid
 sequenceDiagram
@@ -157,7 +158,8 @@ sequenceDiagram
         G-->>R: headers + body
         R->>R: skip op @harmsen.nl of op Date
         R->>A: classify_reply(from, subject, body)
-        A-->>R: afmelding | delay | bounce | hp
+        A-->>R: categorie + confidence
+        R->>R: confidence onder 0.90 wordt hp
         R->>S: status of bouncetelling bijwerken
         R->>G: uid copy Trash + store Deleted + expunge
         R->>R: regel naar data/replieslog.txt
@@ -181,6 +183,8 @@ Het oude en het nieuwe bouncepad naast elkaar:
 - Een classificatiefout richting `afmelding` is niet vanuit Gmail terug te draaien: het bericht staat in de prullenbak en de status is al gewijzigd. Het logbestand uit R12 is het vangnet.
 - Het Gmail-filter blijft berichten met het label `nieuwsbrief` uit INBOX halen. Zodra de afhandelaar het label als bron gebruikt, maakt dat niet meer uit.
 - De eerste run heeft geen tijdstempel en verwerkt daarom de hele achterstand in het label. Concreet: de migadu-bounce van oktober 2025 wordt alsnog geteld met de datum van vandaag, de Gmail-delaymelding verdwijnt, en `amy.klewis@hotmail.co.uk` wordt echt uitgeschreven. De lezersreacties van Elise en Thomas blijven staan.
+- Die migadu-bounce zet meteen een abonnee op `undeliverable`. Hij gaat over `jeroen@nas.nl`, die status `daily` heeft en in `data/undelivered.json` al op `count: 16, permanent_count: 0` staat. Het is een 5xx, dus na tellen wordt het `count: 17, permanent_count: 1` en zakt de drempel naar `PERMANENT_BOUNCE_THRESHOLD` (2). Dat is precies wat R9 vraagt, maar het is wel een statuswijziging en niet alleen een tellertje. Alle dertig entries in dat bestand staan op `permanent_count: 0` met `count >= 1`, dus bij hun volgende 5xx geldt hetzelfde.
+- De 550 in die bounce is `Sender's policy prohibits this message: Reject` van de ontvangende server, geen niet-bestaand postvak. De spam-detectie in `_extract_original_recipient()` zoekt op woorden als spam en blacklist en pikt deze formulering niet op, dus hij telt als harde bounce. Dat gedrag blijft zoals het is, want R9 houdt de telfuncties ongewijzigd.
 
 ### Sequencing
 
@@ -188,7 +192,7 @@ Dit is één lineaire draad. Vier van de vijf units schrijven tests in `tests/ma
 
 | # | Taak | Touches | Depends on |
 |---|---|---|---|
-| U1 | Classificatieprompt en modelaanroep | `src/prompts/classify_reply.md`, `src/ai.py`, `tests/main.py` | - |
+| U1 | Classificatie met een System One model | `pyproject.toml`, `uv.lock`, `src/ai.py`, `tests/main.py` | - |
 | U2 | Abonnee-lookup faalt hard bij databasefouten | `src/subscribers.py`, `tests/main.py` | U1 |
 | U3 | Afhandelaar met tijdstempel, logboek en acties | `src/replies.py`, `tests/main.py` | U1, U2 |
 | U4 | Oude INBOX-bounceroute opruimen | `src/undelivered.py`, `src/gmail.py`, `tests/main.py` | U3 |
@@ -200,27 +204,28 @@ U2 hangt inhoudelijk niet van U1 af; de afhankelijkheid bestaat alleen omdat bei
 
 ## Implementation Units
 
-### U1. Classificatieprompt en modelaanroep
+### U1. Classificatie met een System One model
 
-- **Goal:** Een functie die uit afzender, onderwerp en mailtekst precies één van vier categorieën teruggeeft, met de twijfel-naar-`hp` regel ingebakken.
-- **Requirements:** R4, R5. Instantieert KTD1 en KTD2.
+- **Goal:** Een functie die uit afzender, onderwerp en mailtekst precies één van vier categorieën teruggeeft, met de twijfel-naar-`hp` regel als drempel op de confidence.
+- **Requirements:** R4, R5. Instantieert KTD1, KTD2 en KTD8.
 - **Dependencies:** geen.
-- **Files:** `src/prompts/classify_reply.md` (nieuw), `src/ai.py`, `tests/main.py`
+- **Files:** `pyproject.toml`, `uv.lock`, `src/ai.py`, `tests/main.py`
 - **Approach:**
-  1. Nieuwe prompt `src/prompts/classify_reply.md` met placeholders voor afzender, onderwerp en mailtekst. De prompt beschrijft de vier categorieën en zegt expliciet dat `hp` de uitkomst is zodra er twijfel is, met de "ik ontvang de nieuwsbrief niet meer"-klacht als uitgewerkt tegenvoorbeeld van een afmelding.
-  2. In `src/ai.py` een pydantic-model met één enum-veld voor de categorie, naast de bestaande `Article` en `EditedArticle`.
-  3. `retry_prompt()` krijgt een optionele `response_format` die wordt doorgegeven aan `model.prompt()`; blijft die weg, dan verandert er niets aan het huidige gedrag.
-  4. `classify_reply()` laadt de prompt met `load_prompt()`, kapt de mailtekst af op een vaste lengte, en roept `retry_prompt()` aan met `COPY_WRITE_MODEL`.
-- **Patterns to follow:** `edit_articles()` voor de omgang met een `response_format` die zowel een dict als een pydantic-instance kan teruggeven. `extract_relevant_source_text()` voor de vorm van een kleine, losse modelaanroep via `retry_prompt()`.
-- **Execution note:** Schrijf de test voor `retry_prompt()` met `response_format` vóór de wijziging aan die functie; de bestaande retry-tests in `tests/main.py` moeten ongewijzigd blijven slagen.
+  1. `justai` in `pyproject.toml` naar `>=5.7.1`, daarna `uv lock`.
+  2. In `src/ai.py` naast de bestaande modelconstanten een `CLASSIFY_MODEL = 'openrouter/typesafe/jev-1.13'` en een `MIN_CONFIDENCE = 0.90`. De vier categorieën staan als module-dict `REPLY_CATEGORIES`, met per categorie de omschrijving die het model te zien krijgt; de twijfelregel staat in een `CLASSIFY_INSTRUCTIONS`-constante, met de "ik ontvang de nieuwsbrief niet meer"-klacht als uitgewerkt tegenvoorbeeld van een afmelding.
+  3. `classify_reply(sender, subject, body)` bouwt de toestand als één tekst, kapt de mailtekst af op een vaste lengte, en roept `model.classify(state, REPLY_CATEGORIES, instructions=CLASSIFY_INSTRUCTIONS, cached=False)` aan. Uit het antwoord komen `choice` en `confidence`; onder `MIN_CONFIDENCE` wordt de uitkomst `hp`.
+  4. Geen eigen retry-lus. `classify()` retryt zelf op 429 en 529, en wat daarna nog faalt hoort volgens R15 bij de afhandelaar thuis.
+- **Patterns to follow:** `extract_relevant_source_text()` voor de vorm van een kleine, losse modelaanroep met een eigen modelconstante. `cached=False` zoals elke andere modelaanroep in `src/ai.py`.
+- **Execution note:** De testsuite moet vóór de versiebump al draaien en na de bump nog steeds 23/23 slagen; dat is het bewijs dat 5.7.1 de bestaande pijplijn niet raakt.
 - **Test scenarios:**
-  - `retry_prompt()` geeft `response_format` door aan `model.prompt()` wanneer die is meegegeven.
-  - `retry_prompt()` zonder `response_format` roept `model.prompt()` exact aan zoals nu, zodat `select_articles_for_visuals()` en `extract_relevant_source_text()` niet veranderen.
-  - Covers AE2. Een gemockt model dat `hp` teruggeeft op Elise's tekst levert categorie `hp`.
-  - `classify_reply()` verwerkt zowel een dict als een pydantic-instance uit `model.prompt()`.
-  - Een mailtekst langer dan de afkaplengte wordt afgekapt voordat hij in de prompt gaat.
+  - Covers AE2. Een gemockt model dat `hp` met hoge confidence teruggeeft op Elise's tekst levert categorie `hp`.
+  - Covers R5. Een gemockt model dat `afmelding` met confidence 0.80 teruggeeft levert categorie `hp`, niet `afmelding`.
+  - Een confidence precies op `MIN_CONFIDENCE` levert de gekozen categorie, niet `hp`.
+  - `classify()` krijgt alle vier de categorieën als opties mee, zodat het model nooit uit minder kan kiezen dan R4 voorschrijft.
+  - Een mailtekst langer dan de afkaplengte wordt afgekapt voordat hij naar het model gaat.
   - Een leeg of ontbrekend body-veld levert geen exception maar een normale classificatie-aanroep.
-- **Verification:** `uv run python tests/main.py` slaagt volledig, inclusief de vier bestaande `retry_prompt`-tests.
+  - Een exception uit `classify()` komt ongewijzigd naar buiten, zodat de afhandelaar hem onder R15 kan opvangen.
+- **Verification:** `uv run python tests/main.py` slaagt volledig, inclusief de vier bestaande `retry_prompt`-tests die deze unit niet aanraakt.
 
 ### U2. Abonnee-lookup faalt hard bij databasefouten
 
@@ -244,9 +249,9 @@ U2 hangt inhoudelijk niet van U1 af; de afhankelijkheid bestaat alleen omdat bei
 - **Files:** `src/replies.py` (nieuw), `tests/main.py`
 - **Approach:**
   1. `handle_replies()` is de enige publieke ingang. Hij leest het tijdstempel, opent één `Mail`, selecteert de labelfolder niet-readonly, en doorloopt de UID's.
-  2. Filteren vóór de LLM: een bericht waarvan het From-adres op `@harmsen.nl` eindigt wordt overgeslagen (R2), net als een bericht met een `Date` op of vóór het tijdstempel (R3). `get_email_details()` levert beide velden al.
+  2. Filteren vóór het model: een bericht waarvan het From-adres op `@harmsen.nl` eindigt wordt overgeslagen (R2), net als een bericht met een `Date` op of vóór het tijdstempel (R3). `get_email_details()` levert beide velden al.
   3. Per categorie één actie. Bij `afmelding` eerst `get_subscriber_status()`; alleen bij een gevonden rij volgt `update_subscription(adres, 'unsubscribed')` (R7, KTD6), daarna verwijderen. Bij `bounce` eerst verwijderen en pas bij succes tellen (R9); de recipient en het 4xx/5xx-onderscheid komen uit het bestaande `Mail._extract_original_recipient()`, dat een geparst mailobject verwacht, dus de bounce-tak heeft de volledige mail nodig en niet alleen de tekst die de classificatie kreeg. Levert die extractie geen adres op, dan blijft het bericht staan en wordt er niet geteld. Bij `delay` alleen verwijderen (R10). Bij `hp` gebeurt niets (R11).
-  4. Verwijderen gaat via `Mail.delete_email(uid, folder='nieuwsbrief')`, dus per bericht en op de hergebruikte verbinding (R6).
+  4. Verwijderen gaat via `Mail.delete_email(uid, folder='nieuwsbrief')`, dus per bericht en op de hergebruikte verbinding (R6). Die functie doet `identifier.isdigit()`, dus de UID gaat er als `str` in en niet als de bytes die `uid('search')` teruggeeft.
   5. Elke uitgevoerde actie schrijft één tab-gescheiden regel; regelafbrekingen in het tekstfragment worden vervangen door spaties zodat de regel één regel blijft (R12).
   6. De hele body staat in een `try`/`except Exception` die `lg.error` logt en terugkeert; het tijdstempel wordt alleen weggeschreven als de pass die except niet raakte (R15). Geen `exit()` op welk pad dan ook.
   7. Een `if __name__ == '__main__'` met `load_dotenv()` maakt een handmatige pass mogelijk, zoals `src/undelivered.py` dat nu heeft.
@@ -319,6 +324,8 @@ U2 hangt inhoudelijk niet van U1 af; de afhankelijkheid bestaat alleen omdat bei
 
 De eerste handmatige pass is het moment waarop de achterstand uit het label wordt afgehandeld. Lees `data/replieslog.txt` daarna regel voor regel na: dat is de enige plek waar een misclassificatie nog te zien is, want de berichten zelf staan dan in de prullenbak.
 
+De classificatie is op 26 september 2026 los getoetst op alle acht binnengekomen berichten in het label, met `openrouter/typesafe/jev-1.13`. Acht van de acht goed: `amy.klewis@hotmail.co.uk` op `afmelding` (0.98), de vier mails van Elise en die van Thomas op `hp` (1.00), de Gmail-melding op `delay` (0.96) en de migadu-mail op `bounce` (0.95). De laagste confidence was 0.95, dus `MIN_CONFIDENCE` op 0.90 laat deze acht door en vangt alleen wat duidelijk twijfelachtiger is.
+
 Nieuwe tests worden als functie toegevoegd aan `tests/main.py` en opgenomen in de `tests`-lijst in `main()` daar. Het project gebruikt geen pytest.
 
 ## Definition of Done
@@ -328,6 +335,7 @@ Nieuwe tests worden als functie toegevoegd aan `tests/main.py` en opgenomen in d
 - `src/undelivered.py` en `src/gmail.py` bevatten geen `exit()` en geen INBOX-bounceroute meer.
 - Een handmatige pass over het echte label is gedraaid en `data/replieslog.txt` is regel voor regel nagelezen.
 - `amy.klewis@hotmail.co.uk` staat op `unsubscribed` en de migadu-bounce is geteld.
+- De testsuite slaagt zowel vóór als na de bump naar `justai>=5.7.1`.
 - `docs/architecture.md` beschrijft de afhandelaar in de data flow.
 - Code van doodgelopen pogingen staat niet meer in de diff.
 
@@ -338,7 +346,8 @@ Nieuwe tests worden als functie toegevoegd aan `tests/main.py` en opgenomen in d
 - `src/undelivered.py:75,84`: de `exit(1)` en `exit(0)` die R15 onmogelijk maken. Drempels op regel 16-18: 2 voor 5xx, 5 voor 4xx, reset na 30 dagen.
 - `src/gmail.py:273` `get_undelivered()` selecteert `INBOX`; `src/gmail.py:76` `delete_email()` verplaatst per UID of Message-ID naar `[Gmail]/Trash`; `src/gmail.py:309` `_extract_original_recipient()` levert recipient, `is_permanent` en `is_spam_rejection`.
 - `src/subscribers.py:50` `get_subscriber_status()` slikt databasefouten en geeft dan `None`, niet te onderscheiden van een onbekend adres. `src/subscribers.py:81` `update_subscription()` logt `lg.error` als er geen rij wordt geraakt.
-- `src/ai.py:419` `retry_prompt()`: bestaande retry-helper met `lg.warning` per poging en doorgooien na de laatste.
+- `src/ai.py:419` `retry_prompt()`: bestaande retry-helper met `lg.warning` per poging en doorgooien na de laatste. Deze wijziging raakt hem niet.
+- `justai` 5.7.1: `Model.classify(state, options, instructions=...)` in `justai/model/model.py`, met de wire-vorm in `justai/models/systemone.py`. Een dict met opties geeft een choice terug als `{'type': 'choice', 'choice': ..., 'confidence': ..., 'probabilities': {...}}`. Retryt zelf tweemaal op 429 en 529 en vertaalt HTTP-fouten naar de justai-excepties die `src/ai.py` al importeert. `openrouter/typesafe/jev-1.13` werkt op `/v1/systemone`; `typesafe/jev-router` geeft daar een 400 en is dus geen alternatief.
 - `src/mailer.py:61` zet de `List-Unsubscribe` header met `mailto:nieuwsbrief@harmsen.nl?subject=unsubscribe`. Dat is de bron van de machinale afmeldingen.
 - `main.py:121` roept `handle_undelivered()` aan, 60 seconden na verzending.
 - `docs/architecture.md`, sectie "Foutmelding en escalatie": elk pad dat de nieuwsbrief laat vervallen logt `lg.error`, transient faalgedrag logt `lg.warning` per poging.
@@ -347,3 +356,5 @@ Nieuwe tests worden als functie toegevoegd aan `tests/main.py` en opgenomen in d
 - IMAP-folderlijst op 26 september 2026: het label `nieuwsbrief` bestaat als selecteerbare folder zonder subfolders, naast `y_ai_news`.
 - Label `nieuwsbrief` op 26 september 2026: 15 berichten, oktober 2025 tot september 2026. Zeven daarvan komen van `nieuwsbrief@harmsen.nl` of `hp@harmsen.nl`, dus het From-domein scheidt eigen post feilloos van binnenkomende. Machinale post komt van `mailer-daemon@googlemail.com` (delay) en `MAILER-DAEMON@migadu.com` (harde bounce), beide `multipart/report` met `Auto-Submitted: auto-replied`.
 - `amy.klewis@hotmail.co.uk` heeft status `daily` en `hero@hetab.org` status `weekly` in `nieuwsbrief_subscriber`. AE1 gaat dus over een bekend adres, niet over een onbekend.
+- `_extract_original_recipient()` op de echte machinale post: de Gmail-melding levert `hero@hetab.org` met `is_permanent=False`, de migadu-mail levert `jeroen@nas.nl` met `is_permanent=True` uit een `550 Sender's policy prohibits this message`. Die functie wordt verder alleen door `Mail.get_undelivered()` aangeroepen, dus KTD7 kan die laatste verwijderen en de eerste laten staan.
+- `src/database.py:46` bevat nog een `sys.exit(1)`. Die valt buiten deze wijziging: hij zit in `add_to_database()`, dus vóór verzending en niet in de afhandelaar.
