@@ -32,10 +32,9 @@ ainews/
 ## AI-modellen (in `src/ai.py`)
 - `COPY_WRITE_MODEL` (Claude Sonnet 4.6) — selectie + samenvattingen
 - `EDITOR_MODEL` (Claude Opus 4.7) — eindredactie per artikel (title + summary)
-- `CLASSIFY_MODEL` (Jev 1.13 via OpenRouter) — categorie van binnengekomen post. Een System
-  One model: het genereert geen tekst maar geeft per categorie een gekalibreerde kans, in
+- `CLASSIFY_MODEL` (Jev 1.13 via OpenRouter) — categorie van binnengekomen post, en de keuze
+  welke artikelen visuals krijgen. Een System One model: het genereert geen tekst maar geeft per categorie een gekalibreerde kans, in
   tienden van een seconde. Aanroep via `Model.classify()`, niet via `prompt()`.
-- `SELECTION_MODEL` (GPT-5) — kiezen welke artikelen visuals krijgen
 - `ART_MODEL` (GPT Image 2) — header image
 - `INFOGRAPHIC_MODEL` (Nano Banana 2) — infographic
 
@@ -52,7 +51,10 @@ ainews/
 5. `ai.generate_ai_summary` → list[Article] (gecached als `_summary.jsonl`)
 6. `ai.edit_articles` → per-artikel eindredactie van title + summary (gecached als `_edited.jsonl`)
 7. **Poort 2**: `ai.check_publishable` → bij een reden `lg.error` en stoppen
-8. `ai.select_articles_for_visuals` → indexen voor image en infographic
+8. `ai.select_articles_for_visuals` → indexen voor image en infographic. Eén Jev-aanroep met
+   twee keuzevragen; de code dwingt twee verschillende artikelen af (image eerst, de
+   infographic krijgt het beste van de rest). Na twee mislukte pogingen `lg.error` en
+   artikel 0 en 1, de run gaat door
 9. `ai.generate_ai_image` → header image + S3-URL
 10. `ai.generate_infographic` → infographic + S3-URL
 11. `formatter.create_html_email` → HTML

@@ -19,7 +19,6 @@ from justlog import lg
 
 COPY_WRITE_MODEL = 'claude-sonnet-4-6'
 COPY_WRITE_MODEL_NAME = 'Claude Sonnet 4.6'
-SELECTION_MODEL = 'gpt-5'
 ART_MODEL = 'gpt-image-2-2026-04-21'
 ART_MODEL_NAME = 'GPT Image 2'
 INFOGRAPHIC_MODEL = 'gemini-3.1-flash-image-preview'
@@ -408,15 +407,43 @@ def generate_infographic(articles: list[dict], emails_dict: dict[str, str], sche
     raise TimeoutError(f"Failed to upload infographic to S3 after {s3_attempts} attempts")
 
 
-def select_articles_for_visuals(articles: list[dict]) -> dict:
-    """Selecteer twee verschillende artikelen: één voor de illustratie en één voor de infographic."""
-    prompt = load_prompt('select_visuals',
-                         num_articles=len(articles),
-                         articles=articles,
-                         max_index=len(articles) - 1)
+ILLUSTRATION_INSTRUCTIONS = (
+    'Dit zijn de artikelen van een AI-nieuwsbrief. Welk artikel levert de mooiste '
+    'header-illustratie op? Kies een onderwerp dat visueel rijk is, met een sterke metafoor of '
+    'concrete objecten, en dat niet uitkomt op een generiek robotbeeld.'
+)
+INFOGRAPHIC_INSTRUCTIONS = (
+    'Dit zijn de artikelen van een AI-nieuwsbrief. Welk artikel levert de beste infographic op? '
+    'Kies het artikel met de meeste concrete cijfers, vergelijkingen, tijdlijnen of percentages.'
+)
 
-    model = Model(SELECTION_MODEL)
-    return retry_prompt(model, prompt)
+
+def select_articles_for_visuals(articles: list[dict]) -> dict:
+    """Kies via Jev twee verschillende artikelen: één voor de illustratie en één voor de infographic."""
+    assert len(articles) >= 2, 'een illustratie en een infographic hebben twee artikelen nodig'
+    options = {str(i): f'{a["title"]}: {a["summary"]}' for i, a in enumerate(articles)}
+    questions = {'illustratie': {'type': 'choice', 'criteria': options, 'instructions': ILLUSTRATION_INSTRUCTIONS},
+                 'infographic': {'type': 'choice', 'criteria': options, 'instructions': INFOGRAPHIC_INSTRUCTIONS}}
+    for attempt in range(2):
+        # Bewust breed: ook een onverwachte antwoordvorm (KeyError) mag de nieuwsbrief niet
+        # tegenhouden. Niet stil, want de laatste poging logt lg.error.
+        try:
+            answer = Model(CLASSIFY_MODEL).classify('Kies per vraag één artikel.', questions=questions, cached=False)
+            image = _best_article(answer['illustratie'], len(articles))
+            infographic = _best_article(answer['infographic'], len(articles), exclude=image)
+            return {'image_article': image, 'infographic_article': infographic}
+        except Exception as e:
+            if attempt == 0:
+                lg.warning(f'Visual-selectie mislukt, nog één poging: {type(e).__name__}: {e}')
+            else:
+                lg.error(f'Visual-selectie mislukt, artikel 0 en 1 als fallback: {type(e).__name__}: {e}')
+    return {'image_article': 0, 'infographic_article': 1}
+
+
+def _best_article(answer: dict, count: int, exclude: int | None = None) -> int:
+    """Het artikel met de hoogste kans, zonder `exclude`. Bij gelijke kansen de laagste index."""
+    probs = answer['probabilities']
+    return min((i for i in range(count) if i != exclude), key=lambda i: (-probs.get(str(i), 0.0), i))
 
 
 # De vier categorieen voor post op het nieuwsbriefadres. De omschrijvingen zijn wat het
