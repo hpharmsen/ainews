@@ -529,6 +529,120 @@ def test_classify_lets_a_model_failure_through():
 
 
 # ---------------------------------------------------------------------------
+# Visual-selectie: Jev kiest, de code dwingt twee verschillende artikelen af
+# ---------------------------------------------------------------------------
+
+def _visuals_answer(illustratie: dict[int, float], infographic: dict[int, float]) -> dict:
+    """Een Jev-antwoord op beide vragen, met kansen per artikelindex."""
+    def answer(probs: dict[int, float]) -> dict:
+        best = max(probs, key=probs.get)
+        return {'type': 'choice', 'choice': str(best), 'confidence': probs[best],
+                'probabilities': {str(i): p for i, p in probs.items()}}
+    return {'illustratie': answer(illustratie), 'infographic': answer(infographic)}
+
+
+def _select_visuals(articles: list[dict], *answers):
+    """Draai select_articles_for_visuals met een gemockte Jev die deze antwoorden geeft."""
+    from src.ai import select_articles_for_visuals
+
+    model = MagicMock()
+    model.classify.side_effect = list(answers)
+    with patch('src.ai.Model', return_value=model), patch('src.ai.lg') as log:
+        result = select_articles_for_visuals(articles)
+    return result, model, log
+
+
+def test_visuals_takes_the_choice_of_jev():
+    """R2: elke vraag krijgt het artikel dat Jev het meest geschikt vindt."""
+    answer = _visuals_answer({2: 0.8, 0: 0.2}, {4: 0.9, 2: 0.1})
+    result, _, _ = _select_visuals(_articles(5), answer)
+
+    assert result == {'image_article': 2, 'infographic_article': 4}, f'kreeg {result}'
+    print('  PASS test_visuals_takes_the_choice_of_jev')
+
+
+def test_visuals_gives_the_infographic_the_runner_up_on_a_clash():
+    """R1 en R2: kiezen beide vragen hetzelfde artikel, dan krijgt de infographic de op één na beste."""
+    answer = _visuals_answer({1: 1.0, 3: 0.0}, {1: 1.0, 3: 0.6, 0: 0.2})
+    result, _, _ = _select_visuals(_articles(5), answer)
+
+    assert result == {'image_article': 1, 'infographic_article': 3}, f'kreeg {result}'
+    print('  PASS test_visuals_gives_the_infographic_the_runner_up_on_a_clash')
+
+
+def test_visuals_breaks_a_tie_on_the_lowest_index():
+    """KTD2: staan de overige kansen gelijk, dan wint de laagste index."""
+    answer = _visuals_answer({0: 1.0, 1: 0.0, 2: 0.0, 3: 0.0}, {0: 1.0, 3: 0.0, 2: 0.0, 1: 0.0})
+    result, _, _ = _select_visuals(_articles(4), answer)
+
+    assert result == {'image_article': 0, 'infographic_article': 1}, f'kreeg {result}'
+    print('  PASS test_visuals_breaks_a_tie_on_the_lowest_index')
+
+
+def test_visuals_asks_two_choice_questions_over_all_articles():
+    """KTD1: één aanroep met twee keuzevragen, één optie per artikel met de index als sleutel."""
+    articles = _articles(5)
+    _, model, _ = _select_visuals(articles, _visuals_answer({0: 1.0}, {1: 1.0}))
+
+    assert model.classify.call_count == 1, f'{model.classify.call_count} aanroepen'
+    questions = model.classify.call_args.kwargs['questions']
+    assert set(questions) == {'illustratie', 'infographic'}, f'vragen waren {sorted(questions)}'
+    for name, question in questions.items():
+        assert question['type'] == 'choice', f'{name} is geen choice'
+        assert set(question['criteria']) == {str(i) for i in range(5)}, f'opties van {name}: {question["criteria"]}'
+        for i, article in enumerate(articles):
+            assert article['title'] in question['criteria'][str(i)], f'titel {i} ontbreekt bij {name}'
+    assert model.classify.call_args.kwargs.get('cached') is False, 'KTD5: niet cachen'
+    print('  PASS test_visuals_asks_two_choice_questions_over_all_articles')
+
+
+def test_visuals_retries_once_on_a_failure():
+    """KTD4: één netwerkhik geeft een WARNING en een tweede poging, geen alarm."""
+    from justai.models.basemodel import ConnectionException
+
+    answer = _visuals_answer({2: 1.0}, {3: 1.0})
+    result, _, log = _select_visuals(_articles(4), ConnectionException('hik'), answer)
+
+    assert result == {'image_article': 2, 'infographic_article': 3}, f'kreeg {result}'
+    assert log.warning.call_count == 1, f'{log.warning.call_count} warnings'
+    assert not log.error.called, f'een geslaagde herhaling mag geen ERROR loggen: {log.error.call_args_list}'
+    print('  PASS test_visuals_retries_once_on_a_failure')
+
+
+def test_visuals_falls_back_after_two_failures():
+    """R4: faalt Jev twee keer, dan artikel 0 en 1, een lg.error, en de run gaat door."""
+    from justai.models.basemodel import ConnectionException
+
+    result, _, log = _select_visuals(
+        _articles(4), ConnectionException('weg'), ConnectionException('nog steeds weg'))
+
+    assert result == {'image_article': 0, 'infographic_article': 1}, f'kreeg {result}'
+    assert log.error.call_count == 1, f'{log.error.call_count} errors'
+    print('  PASS test_visuals_falls_back_after_two_failures')
+
+
+def test_visuals_falls_back_on_a_malformed_answer():
+    """KTD6: een antwoord zonder de vraag infographic valt onder dezelfde vangst."""
+    broken = {'illustratie': _visuals_answer({0: 1.0}, {1: 1.0})['illustratie']}
+    result, _, log = _select_visuals(_articles(4), broken, broken)
+
+    assert result == {'image_article': 0, 'infographic_article': 1}, f'kreeg {result}'
+    assert log.error.call_count == 1, f'{log.error.call_count} errors'
+    print('  PASS test_visuals_falls_back_on_a_malformed_answer')
+
+
+def test_visuals_picks_two_valid_articles_from_three():
+    """R1: bij het minimum van 3 artikelen zijn beide indexen geldig en verschillend."""
+    answer = _visuals_answer({2: 1.0, 0: 0.0, 1: 0.0}, {2: 0.9, 0: 0.05, 1: 0.05})
+    result, _, _ = _select_visuals(_articles(3), answer)
+
+    image, infographic = result['image_article'], result['infographic_article']
+    assert image != infographic, f'twee keer artikel {image}'
+    assert {image, infographic} <= {0, 1, 2}, f'ongeldige index in {result}'
+    print('  PASS test_visuals_picks_two_valid_articles_from_three')
+
+
+# ---------------------------------------------------------------------------
 # Abonnee-lookup: een databasestoring is niet hetzelfde als "adres bestaat niet"
 # ---------------------------------------------------------------------------
 
@@ -1152,6 +1266,14 @@ def main():
         test_classify_truncates_a_long_body,
         test_classify_handles_an_empty_body,
         test_classify_lets_a_model_failure_through,
+        test_visuals_takes_the_choice_of_jev,
+        test_visuals_gives_the_infographic_the_runner_up_on_a_clash,
+        test_visuals_breaks_a_tie_on_the_lowest_index,
+        test_visuals_asks_two_choice_questions_over_all_articles,
+        test_visuals_retries_once_on_a_failure,
+        test_visuals_falls_back_after_two_failures,
+        test_visuals_falls_back_on_a_malformed_answer,
+        test_visuals_picks_two_valid_articles_from_three,
         test_subscriber_lookup_raises_on_a_database_failure,
         test_subscriber_lookup_returns_none_for_an_unknown_address,
         test_subscriber_lookup_still_returns_status_and_timestamp,
