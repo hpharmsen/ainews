@@ -98,12 +98,7 @@ def main():
     articles = [articles[article_index]] + articles[:article_index] + articles[article_index + 1:]
 
     # Adjust infographic index after reordering (image article moved to front)
-    infographic_original_index = visual_selection.get('infographic_article')
-    if infographic_original_index is None:
-        lg.warning('No infographic article selected by AI, using fallback')
-        infographic_original_index = 1 if article_index != 1 else 2
-    if infographic_original_index >= len(articles):
-        infographic_original_index = min(1, len(articles) - 1)
+    infographic_original_index = visual_selection['infographic_article']
     if infographic_original_index == article_index:
         infographic_adjusted_index = 0
     elif infographic_original_index < article_index:
