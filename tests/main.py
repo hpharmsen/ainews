@@ -1082,7 +1082,8 @@ def test_marking_undeliverable_respects_a_resubscribe():
 # De afhandelaar in de nieuwsbrief-run: twee passes, en niet bij --dry-run
 # ---------------------------------------------------------------------------
 
-def _run_main(dry_run: bool = False, source_emails: int = 2, real_replies: bool = False):
+def _run_main(dry_run: bool = False, source_emails: int = 2, real_replies: bool = False,
+              selection: dict | None = None, image_index: int = 0):
     """Draai main.main() met alles eromheen afgevangen; geeft de aanroeporde terug."""
     from contextlib import ExitStack
 
@@ -1108,8 +1109,8 @@ def _run_main(dry_run: bool = False, source_emails: int = 2, real_replies: bool 
         'edit_articles': MagicMock(return_value=articles),
         'check_publishable': MagicMock(return_value=None),
         'select_articles_for_visuals': MagicMock(
-            return_value={'image_article': 0, 'infographic_article': 1}),
-        'generate_ai_image': MagicMock(return_value=(0, 'https://example.com/i.png')),
+            return_value=selection or {'image_article': 0, 'infographic_article': 1}),
+        'generate_ai_image': MagicMock(return_value=(image_index, 'https://example.com/i.png')),
         'generate_infographic': MagicMock(return_value=(1, 'https://example.com/g.png')),
         'create_html_email': MagicMock(return_value='<html></html>'),
         'add_to_database': MagicMock(),
@@ -1161,6 +1162,40 @@ def test_main_sends_the_newsletter_when_the_handler_fails():
     assert doubles['send_newsletter'].called, 'de nieuwsbrief had gewoon uit moeten gaan'
     assert lg_mock.error.called, 'een mislukte pass hoort een lg.error te geven'
     print('  PASS test_main_sends_the_newsletter_when_the_handler_fails')
+
+
+def _infographic_index(selection: dict, image_index: int) -> int:
+    """De infographic-index die main na het naar voren schuiven van het image-artikel doorgeeft."""
+    _, doubles = _run_main(selection=selection, image_index=image_index)
+    return doubles['generate_infographic'].call_args.kwargs['visual_selection']['infographic_article']
+
+
+def test_main_shifts_the_infographic_behind_the_moved_image_article():
+    """Artikel 0 schuift een plek op als artikel 2 naar voren gaat."""
+    index = _infographic_index({'image_article': 2, 'infographic_article': 0}, image_index=2)
+    assert index == 1, f'verwacht 1, kreeg {index}'
+    print('  PASS test_main_shifts_the_infographic_behind_the_moved_image_article')
+
+
+def test_main_keeps_the_infographic_index_when_the_image_stays_first():
+    index = _infographic_index({'image_article': 0, 'infographic_article': 1}, image_index=0)
+    assert index == 1, f'verwacht 1, kreeg {index}'
+    print('  PASS test_main_keeps_the_infographic_index_when_the_image_stays_first')
+
+
+def test_main_handles_a_cached_image_that_ignores_the_selection():
+    """Bij --cached geeft generate_ai_image altijd 0 terug, ook als de selectie iets anders zei."""
+    index = _infographic_index({'image_article': 2, 'infographic_article': 0}, image_index=0)
+    assert index == 0, f'verwacht 0, kreeg {index}'
+    print('  PASS test_main_handles_a_cached_image_that_ignores_the_selection')
+
+
+def test_the_infographic_fallbacks_in_main_are_gone():
+    """R5: select_articles_for_visuals levert altijd een geldige, andere index. Afvangen is dode code."""
+    main_py = (Path(__file__).resolve().parent.parent / 'main.py').read_text()
+    assert 'No infographic article selected' not in main_py, 'de tak voor een ontbrekende index staat er nog'
+    assert '>= len(articles)' not in main_py, 'de klem voor een te grote index staat er nog'
+    print('  PASS test_the_infographic_fallbacks_in_main_are_gone')
 
 
 # ---------------------------------------------------------------------------
@@ -1299,6 +1334,10 @@ def main():
         test_main_skips_the_handler_on_a_dry_run,
         test_main_runs_the_first_pass_even_when_the_source_gate_stops_the_run,
         test_main_sends_the_newsletter_when_the_handler_fails,
+        test_main_shifts_the_infographic_behind_the_moved_image_article,
+        test_main_keeps_the_infographic_index_when_the_image_stays_first,
+        test_main_handles_a_cached_image_that_ignores_the_selection,
+        test_the_infographic_fallbacks_in_main_are_gone,
         test_smtp_reconnects_after_broken_connection,
         test_smtp_reports_actual_count_not_subscriber_count,
     ]
