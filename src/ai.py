@@ -10,21 +10,21 @@ from justai import Model
 from justai.models.basemodel import (ConnectionException, GeneralException, ModelOverloadException,
                                      RatelimitException)
 from justdays import Day
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field
 from typing import Annotated
 
 from src.database import get_last_newsletter_summaries, cache_file_prefix
 from src.s3 import S3
 from justlog import lg
 
-COPY_WRITE_MODEL = 'claude-sonnet-4-6'
-COPY_WRITE_MODEL_NAME = 'Claude Sonnet 4.6'
+COPY_WRITE_MODEL = 'gpt-6-luna'
+COPY_WRITE_MODEL_NAME = 'GPT-6 Luna'
 ART_MODEL = 'gpt-image-2-2026-04-21'
 ART_MODEL_NAME = 'GPT Image 2'
 INFOGRAPHIC_MODEL = 'gemini-3.1-flash-image-preview'
 INFOGRAPHIC_MODEL_NAME = 'Nano Banana 2'
-EDITOR_MODEL = 'claude-opus-4-7'
-EDITOR_MODEL_NAME = 'Claude Opus 4.7'
+EDITOR_MODEL = 'claude-opus-5-5'
+EDITOR_MODEL_NAME = 'Claude Opus 5.5'
 # System One model: geen tekstgeneratie maar een gekalibreerde kans per categorie,
 # in tienden van een seconde. jev-router werkt niet op /v1/systemone, jev-1.13 wel.
 CLASSIFY_MODEL = 'openrouter/typesafe/jev-1.13'
@@ -51,7 +51,9 @@ class Article(BaseModel):
     summary: str = Field(
         description="4–8 zinnen met regelafbrekingen toegestaan, plain text zonder markdown of HTML"
     )
-    links: list[HttpUrl] = Field(
+    # str en geen HttpUrl: OpenAI weigert het 'uri'-format in een schema. De links gaan hierna
+    # toch langs check_and_resolve_url.
+    links: list[str] = Field(
         description="Canonieke bronlinks gebruikt in het artikel"
     )
     sources: list[str] = Field(
@@ -200,7 +202,7 @@ def generate_ai_summary(schedule: str, text: str, verbose=False, cached=True):
             elif resolved != str(link):
                 lg.info(f'Redirected {link} -> {resolved}')
                 idx = article.links.index(link)
-                article.links[idx] = HttpUrl(resolved)
+                article.links[idx] = resolved
 
     # Save to cache and convert to dicts for downstream use
     result = []

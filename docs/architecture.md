@@ -30,8 +30,8 @@ ainews/
 ```
 
 ## AI-modellen (in `src/ai.py`)
-- `COPY_WRITE_MODEL` (Claude Sonnet 4.6) — selectie + samenvattingen
-- `EDITOR_MODEL` (Claude Opus 4.7) — eindredactie per artikel (title + summary)
+- `COPY_WRITE_MODEL` (GPT-6 Luna) — selectie + samenvattingen
+- `EDITOR_MODEL` (Claude Opus 5.5) — eindredactie per artikel (title + summary)
 - `CLASSIFY_MODEL` (Jev 1.13 via OpenRouter) — categorie van binnengekomen post, en de keuze
   welke artikelen visuals krijgen. Een System One model: het genereert geen tekst maar geeft per categorie een gekalibreerde kans, in
   tienden van een seconde. Aanroep via `Model.classify()`, niet via `prompt()`.
