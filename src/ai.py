@@ -28,6 +28,7 @@ EDITOR_MODEL_NAME = 'Claude Opus 5.5'
 # System One model: geen tekstgeneratie maar een gekalibreerde kans per categorie,
 # in tienden van een seconde. jev-router werkt niet op /v1/systemone, jev-1.13 wel.
 CLASSIFY_MODEL = 'openrouter/typesafe/jev-1.13'
+CLASSIFY_MODEL_NAME = 'Jev 1.13'
 
 PROMPTS_DIR = Path(__file__).parent / 'prompts'
 COLORS = ['rood', 'groen', 'grijs', 'bruin', 'oranje', 'paars', 'blauw']
