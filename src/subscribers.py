@@ -2,7 +2,7 @@ import os
 import traceback
 from typing import List
 from contextlib import contextmanager
-from sqlalchemy import create_engine, MetaData, select, update
+from sqlalchemy import create_engine, MetaData, select, update, func
 from dotenv import load_dotenv
 
 from justlog import lg
@@ -68,7 +68,7 @@ def update_subscription(email: str, status: str) -> bool:
             subscriber_table = tables['nieuwsbrief_subscriber']
 
             with conn.begin():
-                query = update(subscriber_table).where(subscriber_table.c.email == email).values(status=status)
+                query = update(subscriber_table).where(subscriber_table.c.email == email).values(status=status, updated_at=func.now())
                 result = conn.execute(query)
                 if result.rowcount > 0:
                     lg.info(f"Updated {email} to status '{status}'")
