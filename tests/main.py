@@ -1,11 +1,13 @@
 """Lichtgewicht test-runner. Draai met `python tests/main.py`."""
+
 import json
 import os
 import sys
 import tempfile
 import time
+from datetime import UTC
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -40,13 +42,10 @@ def test_cache_hit_skips_llm():
             from src.ai import edit_articles
 
             # Schrijf een cache-file zoals edit_articles dat zou doen
-            cached_data = [
-                {'title': 'cached', 'summary': 'cached summary', 'links': [], 'sources': []}
-            ]
+            cached_data = [{'title': 'cached', 'summary': 'cached summary', 'links': [], 'sources': []}]
             cache_path = tmpdir / 'test_daily_edited.jsonl'
             with open(cache_path, 'w') as f:
-                for art in cached_data:
-                    f.write(json.dumps(art) + '\n')
+                f.writelines(json.dumps(art) + '\n' for art in cached_data)
 
             # Model.__init__ exploderen als de mock toch wordt aangeroepen
             with patch('src.ai.Model', side_effect=AssertionError('Model should not be instantiated on cache hit')):
@@ -61,7 +60,7 @@ def test_preserves_links_and_sources():
     with tempfile.TemporaryDirectory() as tmp:
         tmpdir = Path(tmp)
         with _patch_cache_prefix(tmpdir):
-            from src.ai import edit_articles, EditedArticle
+            from src.ai import EditedArticle, edit_articles
 
             # Mock Model: prompt() geeft EditedArticle instance terug met andere title/summary
             mock_instance = MagicMock()
@@ -111,7 +110,7 @@ def test_writes_cache_file():
     with tempfile.TemporaryDirectory() as tmp:
         tmpdir = Path(tmp)
         with _patch_cache_prefix(tmpdir):
-            from src.ai import edit_articles, EditedArticle
+            from src.ai import EditedArticle, edit_articles
 
             mock_instance = MagicMock()
             mock_instance.prompt.side_effect = [
@@ -135,6 +134,7 @@ def test_writes_cache_file():
 def test_retry_prompt_retries_connection_error():
     """retry_prompt moet ConnectionException opvangen en opnieuw proberen."""
     from justai.models.basemodel import ConnectionException
+
     from src.ai import retry_prompt
 
     mock_model = MagicMock()
@@ -154,6 +154,7 @@ def test_retry_prompt_retries_connection_error():
 def test_retry_prompt_exhausts_and_reraises_connection_error():
     """Na 5 mislukkingen moet retry_prompt de laatste ConnectionException re-raisen."""
     from justai.models.basemodel import ConnectionException
+
     from src.ai import retry_prompt
 
     mock_model = MagicMock()
@@ -172,6 +173,7 @@ def test_retry_prompt_exhausts_and_reraises_connection_error():
 def test_retry_prompt_still_retries_ratelimit():
     """Regressie: RatelimitException blijft ook opgevangen worden."""
     from justai.models.basemodel import RatelimitException
+
     from src.ai import retry_prompt
 
     mock_model = MagicMock()
@@ -190,6 +192,7 @@ def test_retry_prompt_still_retries_ratelimit():
 def test_retry_prompt_uses_exponential_backoff():
     """Sleep-waardes moeten oplopen: 5, 10, 20, 40, ... (max 60)."""
     from justai.models.basemodel import ConnectionException
+
     from src.ai import retry_prompt
 
     mock_model = MagicMock()
@@ -211,25 +214,30 @@ def test_retry_prompt_uses_exponential_backoff():
 # ---------------------------------------------------------------------------
 
 # De letterlijke payload die op 2026-08-25 naar 56 abonnees ging.
-INCIDENT_2026_08_25 = [{
-    'title': 'Geen bruikbaar nieuws beschikbaar',
-    'summary': 'De ontvangen e-mail van AI Central bevat geen concrete, verifieerbare '
-               'nieuwsfeiten die geschikt zijn voor de nieuwsbrief. De mail beschrijft een '
-               'algemene tip over het analyseren van PDF-rapporten met AI, maar noemt geen '
-               'specifieke tools, cijfers, datums of productlanceringen.',
-    'links': [],
-    'sources': ['AI Central, Kris'],
-}]
+INCIDENT_2026_08_25 = [
+    {
+        'title': 'Geen bruikbaar nieuws beschikbaar',
+        'summary': 'De ontvangen e-mail van AI Central bevat geen concrete, verifieerbare '
+        'nieuwsfeiten die geschikt zijn voor de nieuwsbrief. De mail beschrijft een '
+        'algemene tip over het analyseren van PDF-rapporten met AI, maar noemt geen '
+        'specifieke tools, cijfers, datums of productlanceringen.',
+        'links': [],
+        'sources': ['AI Central, Kris'],
+    }
+]
 
 
 def _articles(count: int, with_links: int = 99) -> list[dict]:
     """Bouw `count` artikelen, waarvan de eerste `with_links` een bronlink hebben."""
-    return [{
-        'title': f'Artikel {i}',
-        'summary': f'Samenvatting van artikel {i}. Met een tweede zin erbij.',
-        'links': [f'https://example.com/{i}'] if i < with_links else [],
-        'sources': [f'Bron {i}'],
-    } for i in range(count)]
+    return [
+        {
+            'title': f'Artikel {i}',
+            'summary': f'Samenvatting van artikel {i}. Met een tweede zin erbij.',
+            'links': [f'https://example.com/{i}'] if i < with_links else [],
+            'sources': [f'Bron {i}'],
+        }
+        for i in range(count)
+    ]
 
 
 def test_publishable_rejects_incident_2026_08_25():
@@ -283,6 +291,7 @@ def test_publishable_rejects_empty_summary():
 # Ophaalvenster: een late vorige run mag het venster niet uithongeren
 # ---------------------------------------------------------------------------
 
+
 def _write_last_sent(tmpdir: Path, schedule: str, moment) -> Path:
     path = tmpdir / 'last_sent.json'
     path.write_text(json.dumps({'last_sent': {schedule: moment.isoformat()}}))
@@ -291,10 +300,11 @@ def _write_last_sent(tmpdir: Path, schedule: str, moment) -> Path:
 
 def test_lookback_floor_when_last_send_was_recent():
     """Kern van het incident: last_sent 2 uur geleden -> venster toch 24 uur terug."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
+
     from src import gmail
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     with tempfile.TemporaryDirectory() as tmp:
         path = _write_last_sent(Path(tmp), 'daily', now - timedelta(hours=2))
         with patch.object(gmail, 'LAST_SENT_FILE', path):
@@ -307,10 +317,11 @@ def test_lookback_floor_when_last_send_was_recent():
 
 def test_lookback_uses_last_sent_when_older_than_floor():
     """last_sent 3 dagen geleden -> venster blijft die 3 dagen, niet ingekort tot 24u."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
+
     from src import gmail
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     three_days_ago = now - timedelta(days=3)
     with tempfile.TemporaryDirectory() as tmp:
         path = _write_last_sent(Path(tmp), 'daily', three_days_ago)
@@ -323,10 +334,11 @@ def test_lookback_uses_last_sent_when_older_than_floor():
 
 def test_lookback_weekly_floor_is_a_week():
     """Weekly kijkt minstens 7 dagen terug."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
+
     from src import gmail
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     with tempfile.TemporaryDirectory() as tmp:
         path = _write_last_sent(Path(tmp), 'weekly', now - timedelta(hours=2))
         with patch.object(gmail, 'LAST_SENT_FILE', path):
@@ -338,10 +350,11 @@ def test_lookback_weekly_floor_is_a_week():
 
 def test_lookback_falls_back_when_file_missing():
     """Ontbrekend last_sent.json valt terug op de ondergrens in plaats van te crashen."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
+
     from src import gmail
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     with tempfile.TemporaryDirectory() as tmp:
         with patch.object(gmail, 'LAST_SENT_FILE', Path(tmp) / 'bestaat-niet.json'):
             start = gmail.fetch_window_start('daily')
@@ -354,9 +367,11 @@ def test_lookback_falls_back_when_file_missing():
 # Bronlinks: de nieuwsbrief van 8 september bevatte er nul
 # ---------------------------------------------------------------------------
 
+
 def _mail_with_parts(plain: str, html: str):
     """Een Mail met een gemockte IMAP-verbinding die deze ene mail teruggeeft."""
     from email.message import EmailMessage
+
     from src.gmail import Mail
 
     msg = EmailMessage()
@@ -383,9 +398,7 @@ def test_body_falls_back_to_html_when_plaintext_has_no_links():
 
 def test_body_prefers_plaintext_when_it_has_links():
     """Beehiiv-bronnen leveren markdown met links; die compacte versie houden we."""
-    plain = ('[Item een](https://example.com/1)\n'
-             '[Item twee](https://example.com/2)\n'
-             '[Item drie](https://example.com/3)')
+    plain = '[Item een](https://example.com/1)\n[Item twee](https://example.com/2)\n[Item drie](https://example.com/3)'
     html = '<p><a href="https://example.com/anders">Iets anders</a></p>'
 
     body = _mail_with_parts(plain, html).get_email_body('1')
@@ -532,12 +545,19 @@ def test_classify_lets_a_model_failure_through():
 # Visual-selectie: Jev kiest, de code dwingt twee verschillende artikelen af
 # ---------------------------------------------------------------------------
 
+
 def _visuals_answer(illustratie: dict[int, float], infographic: dict[int, float]) -> dict:
     """Een Jev-antwoord op beide vragen, met kansen per artikelindex."""
+
     def answer(probs: dict[int, float]) -> dict:
         best = max(probs, key=probs.get)
-        return {'type': 'choice', 'choice': str(best), 'confidence': probs[best],
-                'probabilities': {str(i): p for i, p in probs.items()}}
+        return {
+            'type': 'choice',
+            'choice': str(best),
+            'confidence': probs[best],
+            'probabilities': {str(i): p for i, p in probs.items()},
+        }
+
     return {'illustratie': answer(illustratie), 'infographic': answer(infographic)}
 
 
@@ -613,8 +633,7 @@ def test_visuals_falls_back_after_two_failures():
     """R4: faalt Jev twee keer, dan artikel 0 en 1, een lg.error, en de run gaat door."""
     from justai.models.basemodel import ConnectionException
 
-    result, _, log = _select_visuals(
-        _articles(4), ConnectionException('weg'), ConnectionException('nog steeds weg'))
+    result, _, log = _select_visuals(_articles(4), ConnectionException('weg'), ConnectionException('nog steeds weg'))
 
     assert result == {'image_article': 0, 'infographic_article': 1}, f'kreeg {result}'
     assert log.error.call_count == 1, f'{log.error.call_count} errors'
@@ -646,12 +665,18 @@ def test_visuals_picks_two_valid_articles_from_three():
 # Abonnee-lookup: een databasestoring is niet hetzelfde als "adres bestaat niet"
 # ---------------------------------------------------------------------------
 
+
 def _subscriber_table():
     """Een echte tabeldefinitie, zodat select() een geldige query kan bouwen."""
     from sqlalchemy import Column, DateTime, MetaData, String, Table
 
-    return Table('nieuwsbrief_subscriber', MetaData(),
-                 Column('email', String), Column('status', String), Column('updated_at', DateTime))
+    return Table(
+        'nieuwsbrief_subscriber',
+        MetaData(),
+        Column('email', String),
+        Column('status', String),
+        Column('updated_at', DateTime),
+    )
 
 
 def _patch_subscriber_db(row=None, error: Exception | None = None):
@@ -698,11 +723,11 @@ def test_subscriber_lookup_returns_none_for_an_unknown_address():
 
 def test_subscriber_lookup_still_returns_status_and_timestamp():
     """Het bestaande gedrag voor een bekend adres blijft ongewijzigd."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from src.subscribers import get_subscriber_status
 
-    moment = datetime(2025, 11, 26, 20, 33, tzinfo=timezone.utc)
+    moment = datetime(2025, 11, 26, 20, 33, tzinfo=UTC)
     with _patch_subscriber_db(row=('daily', moment)):
         result = get_subscriber_status('amy.klewis@hotmail.co.uk')
 
@@ -724,8 +749,7 @@ be delivered to one or more recipients.
 """
 
 
-def _reply_message(sender: str, subject: str, body: str,
-                   date: str = 'Wed, 23 Sep 2026 06:59:53 +0000'):
+def _reply_message(sender: str, subject: str, body: str, date: str = 'Wed, 23 Sep 2026 06:59:53 +0000'):
     """Een echte mail, zodat de headerverwerking niet wegvalt achter een mock."""
     from email.message import EmailMessage
 
@@ -748,8 +772,7 @@ def _fake_mail(messages: dict, delete_ok: bool = True, connected: bool = True):
     mail.mail.uid.return_value = ('OK', [' '.join(messages).encode()])
     mail.get_message.side_effect = messages.get
     mail.delete_email.return_value = delete_ok
-    mail._extract_original_recipient.side_effect = (
-        lambda msg: Mail._extract_original_recipient(mail, msg))
+    mail._extract_original_recipient.side_effect = lambda msg: Mail._extract_original_recipient(mail, msg)
     return mail
 
 
@@ -758,7 +781,7 @@ def _run_handler(tmpdir: Path, mail, category, *, status=None, seen=None):
 
     Geeft (update_calls, undelivered_data, logregels, weggeschreven tijdstempel) terug.
     """
-    import src.replies as replies
+    from src import replies
 
     seen_file = tmpdir / 'replies_seen.json'
     if seen is not None:
@@ -769,28 +792,41 @@ def _run_handler(tmpdir: Path, mail, category, *, status=None, seen=None):
     classify = category if callable(category) else (lambda *a, **k: category)
     update = MagicMock(return_value=True)
 
-    with patch.object(replies, 'Mail', return_value=mail), \
-            patch.object(replies, 'SEEN_FILE', seen_file), \
-            patch.object(replies, 'LOG_FILE', log_file), \
-            patch.object(replies, 'classify_reply', side_effect=classify) as classify_mock, \
-            patch.object(replies, 'get_subscriber_status', return_value=status), \
-            patch.object(replies, 'update_subscription', update), \
-            patch('src.undelivered.undelivered_file', undelivered), \
-            patch('src.replies.mark_undeliverable') as mark_mock:
+    with (
+        patch.object(replies, 'Mail', return_value=mail),
+        patch.object(replies, 'SEEN_FILE', seen_file),
+        patch.object(replies, 'LOG_FILE', log_file),
+        patch.object(replies, 'classify_reply', side_effect=classify) as classify_mock,
+        patch.object(replies, 'get_subscriber_status', return_value=status),
+        patch.object(replies, 'update_subscription', update),
+        patch('src.undelivered.undelivered_file', undelivered),
+        patch('src.replies.mark_undeliverable') as mark_mock,
+    ):
         replies.handle_replies()
 
     lines = log_file.read_text(encoding='utf-8').splitlines() if log_file.exists() else []
     counts = json.loads(undelivered.read_text()) if undelivered.exists() else {}
     stamp = json.loads(seen_file.read_text())['last_pass'] if seen_file.exists() else None
-    return {'update': update, 'counts': counts, 'lines': lines, 'stamp': stamp,
-            'classify': classify_mock, 'mark': mark_mock}
+    return {
+        'update': update,
+        'counts': counts,
+        'lines': lines,
+        'stamp': stamp,
+        'classify': classify_mock,
+        'mark': mark_mock,
+    }
 
 
 def test_replies_unsubscribes_a_known_address():
     """AE1: afmelding van een bekend adres levert unsubscribed, verwijderen en een logregel."""
     with tempfile.TemporaryDirectory() as tmp:
-        mail = _fake_mail({'3': _reply_message('amy.klewis@hotmail.co.uk', 'unsubscribe',
-                                               'Apple Mail sent this email to unsubscribe')})
+        mail = _fake_mail(
+            {
+                '3': _reply_message(
+                    'amy.klewis@hotmail.co.uk', 'unsubscribe', 'Apple Mail sent this email to unsubscribe'
+                )
+            }
+        )
         r = _run_handler(Path(tmp), mail, 'afmelding', status={'status': 'daily', 'updated_at': None})
 
     r['update'].assert_called_once_with('amy.klewis@hotmail.co.uk', 'unsubscribed')
@@ -817,9 +853,15 @@ def test_replies_drops_an_unknown_unsubscribe_silently():
 def test_replies_deletes_a_delay_without_counting_it():
     """AE3: een delay-melding verdwijnt, maar raakt de bouncetelling niet."""
     with tempfile.TemporaryDirectory() as tmp:
-        mail = _fake_mail({'2': _reply_message('mailer-daemon@googlemail.com',
-                                               'Delivery Status Notification (Delay)',
-                                               'will retry for 46 more hours hero@hetab.org')})
+        mail = _fake_mail(
+            {
+                '2': _reply_message(
+                    'mailer-daemon@googlemail.com',
+                    'Delivery Status Notification (Delay)',
+                    'will retry for 46 more hours hero@hetab.org',
+                )
+            }
+        )
         r = _run_handler(Path(tmp), mail, 'delay')
 
     mail.delete_email.assert_called_once_with('2', folder='nieuwsbrief')
@@ -832,9 +874,9 @@ def test_replies_deletes_a_delay_without_counting_it():
 def test_replies_counts_a_permanent_bounce():
     """AE4: een 5xx-bounce verhoogt permanent_count voor het geextraheerde adres."""
     with tempfile.TemporaryDirectory() as tmp:
-        mail = _fake_mail({'15': _reply_message('MAILER-DAEMON@migadu.com',
-                                                'Undelivered Mail Returned to Sender',
-                                                MIGADU_BOUNCE)})
+        mail = _fake_mail(
+            {'15': _reply_message('MAILER-DAEMON@migadu.com', 'Undelivered Mail Returned to Sender', MIGADU_BOUNCE)}
+        )
         r = _run_handler(Path(tmp), mail, 'bounce')
 
     assert 'jeroen@nas.nl' in r['counts'], f'adres niet geteld, kreeg {r["counts"]}'
@@ -848,8 +890,9 @@ def test_replies_counts_a_permanent_bounce():
 def test_replies_does_not_count_a_bounce_it_could_not_delete():
     """Tellen na verwijderen, anders telt de volgende pass dezelfde bounce nog eens."""
     with tempfile.TemporaryDirectory() as tmp:
-        mail = _fake_mail({'15': _reply_message('MAILER-DAEMON@migadu.com', 'Undelivered',
-                                                MIGADU_BOUNCE)}, delete_ok=False)
+        mail = _fake_mail(
+            {'15': _reply_message('MAILER-DAEMON@migadu.com', 'Undelivered', MIGADU_BOUNCE)}, delete_ok=False
+        )
         r = _run_handler(Path(tmp), mail, 'bounce')
 
     assert r['counts'] == {}, f'mislukte verwijdering mag niet tellen, kreeg {r["counts"]}'
@@ -860,8 +903,9 @@ def test_replies_does_not_count_a_bounce_it_could_not_delete():
 def test_replies_leaves_a_bounce_without_a_recipient_alone():
     """Zonder ontvangeradres valt er niets te tellen, dus blijft het bericht staan."""
     with tempfile.TemporaryDirectory() as tmp:
-        mail = _fake_mail({'9': _reply_message('MAILER-DAEMON@example.com', 'Undelivered',
-                                               'iets ging mis, geen adres te vinden')})
+        mail = _fake_mail(
+            {'9': _reply_message('MAILER-DAEMON@example.com', 'Undelivered', 'iets ging mis, geen adres te vinden')}
+        )
         r = _run_handler(Path(tmp), mail, 'bounce')
 
     assert not mail.delete_email.called, 'bericht had moeten blijven staan'
@@ -872,8 +916,9 @@ def test_replies_leaves_a_bounce_without_a_recipient_alone():
 def test_replies_skips_a_message_older_than_the_timestamp():
     """AE6: wat gisteren al bekeken is krijgt vandaag geen tweede gok."""
     with tempfile.TemporaryDirectory() as tmp:
-        mail = _fake_mail({'4': _reply_message('elise@idest.nl', 'Re: daily', ELISE,
-                                               date='Sat, 18 Apr 2026 15:31:28 +0200')})
+        mail = _fake_mail(
+            {'4': _reply_message('elise@idest.nl', 'Re: daily', ELISE, date='Sat, 18 Apr 2026 15:31:28 +0200')}
+        )
         r = _run_handler(Path(tmp), mail, 'hp', seen='2026-09-01T00:00:00+00:00')
 
     assert not r['classify'].called, 'oud bericht mag geen modelaanroep kosten'
@@ -884,10 +929,12 @@ def test_replies_skips_a_message_older_than_the_timestamp():
 def test_replies_skips_its_own_mail():
     """R2: verzonden nieuwsbrieven en HP's eigen antwoorden zitten ook in het label."""
     with tempfile.TemporaryDirectory() as tmp:
-        mail = _fake_mail({
-            '1': _reply_message('nieuwsbrief@harmsen.nl', "HP's AI weekly - week 39", 'de brief'),
-            '7': _reply_message('hp@harmsen.nl', 'Re: HP AI daily', 'mijn antwoord'),
-        })
+        mail = _fake_mail(
+            {
+                '1': _reply_message('nieuwsbrief@harmsen.nl', "HP's AI weekly - week 39", 'de brief'),
+                '7': _reply_message('hp@harmsen.nl', 'Re: HP AI daily', 'mijn antwoord'),
+            }
+        )
         r = _run_handler(Path(tmp), mail, 'afmelding')
 
     assert not r['classify'].called, 'eigen post mag geen modelaanroep kosten'
@@ -940,8 +987,9 @@ def test_replies_advances_the_timestamp_on_an_empty_label():
 def test_replies_processes_everything_without_a_timestamp_file():
     """Zonder data/replies_seen.json is de hele achterstand nieuw."""
     with tempfile.TemporaryDirectory() as tmp:
-        mail = _fake_mail({'12': _reply_message('elise@idest.nl', 'Re: daily', ELISE,
-                                                date='Mon, 20 Oct 2025 13:53:06 +0200')})
+        mail = _fake_mail(
+            {'12': _reply_message('elise@idest.nl', 'Re: daily', ELISE, date='Mon, 20 Oct 2025 13:53:06 +0200')}
+        )
         r = _run_handler(Path(tmp), mail, 'hp', seen=None)
 
     assert r['classify'].call_count == 1, 'oude post moet alsnog langs het model'
@@ -963,8 +1011,9 @@ def test_replies_leaves_hp_mail_untouched():
 def test_replies_keeps_a_log_line_on_one_line():
     """R12: het tekstfragment is vrije tekst, dus regelafbrekingen moeten eruit."""
     with tempfile.TemporaryDirectory() as tmp:
-        mail = _fake_mail({'3': _reply_message('iemand@example.com', 'unsubscribe',
-                                               'Regel een\nRegel twee\r\nRegel drie')})
+        mail = _fake_mail(
+            {'3': _reply_message('iemand@example.com', 'unsubscribe', 'Regel een\nRegel twee\r\nRegel drie')}
+        )
         r = _run_handler(Path(tmp), mail, 'afmelding', status={'status': 'daily', 'updated_at': None})
 
     assert len(r['lines']) == 1, f'verwacht 1 regel, kreeg {len(r["lines"])}: {r["lines"]}'
@@ -975,11 +1024,11 @@ def test_replies_keeps_a_log_line_on_one_line():
 
 def test_replies_stamps_the_start_of_the_pass():
     """KTD4: post die tijdens de pass binnenkomt moet de volgende keer alsnog gezien worden."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    import src.replies as replies
+    from src import replies
 
-    before = datetime.now(timezone.utc)
+    before = datetime.now(UTC)
     with tempfile.TemporaryDirectory() as tmp:
         mail = _fake_mail({'4': _reply_message('elise@idest.nl', 'Re: daily', ELISE)})
         # get_message vertraagt de pass, zodat begin en eind aantoonbaar verschillen.
@@ -991,12 +1040,11 @@ def test_replies_stamps_the_start_of_the_pass():
 
         mail.get_message.side_effect = slow
         r = _run_handler(Path(tmp), mail, 'hp')
-    after = datetime.now(timezone.utc)
+    after = datetime.now(UTC)
 
     stamp = datetime.fromisoformat(r['stamp'])
     assert before <= stamp, f'tijdstempel {stamp} ligt voor het begin van de pass'
-    assert (after - stamp).total_seconds() >= 0.2, (
-        f'tijdstempel {stamp} is het eind van de pass, niet het begin')
+    assert (after - stamp).total_seconds() >= 0.2, f'tijdstempel {stamp} is het eind van de pass, niet het begin'
     assert replies.SEEN_FILE.name == 'replies_seen.json'
     print('  PASS test_replies_stamps_the_start_of_the_pass')
 
@@ -1004,6 +1052,7 @@ def test_replies_stamps_the_start_of_the_pass():
 # ---------------------------------------------------------------------------
 # Bounces: één ingang, en geen pad dat het proces kan afbreken
 # ---------------------------------------------------------------------------
+
 
 def test_the_inbox_bounce_route_is_gone():
     """KTD7: de oude ingang zocht op INBOX en kon met exit() de hele run stoppen."""
@@ -1013,8 +1062,7 @@ def test_the_inbox_bounce_route_is_gone():
     main_py = (root / 'main.py').read_text()
 
     assert 'exit(' not in undelivered, 'src/undelivered.py bevat nog een exit()'
-    for gone in ('def get_mail(', 'def get_undelivered_emails(',
-                 'def delete_emails(', 'def handle_undelivered('):
+    for gone in ('def get_mail(', 'def get_undelivered_emails(', 'def delete_emails(', 'def handle_undelivered('):
         assert gone not in undelivered, f'{gone} staat nog in src/undelivered.py'
     assert 'def get_undelivered(' not in gmail, 'Mail.get_undelivered() bestaat nog'
     assert 'handle_undelivered' not in main_py, 'main.py verwijst nog naar handle_undelivered'
@@ -1036,16 +1084,20 @@ def test_bounce_counting_is_unchanged():
         with patch('src.undelivered.undelivered_file', counts_file):
             from src.undelivered import parse_undelivered_emails
 
-            to_delete, to_mark = parse_undelivered_emails([
-                {'email_id': '1', 'recipient_email': 'dood@example.com', 'is_permanent': True},
-                {'email_id': '2', 'recipient_email': 'vol@example.com', 'is_permanent': False},
-                {'email_id': '3', 'recipient_email': 'spam@example.com', 'is_spam_rejection': True},
-            ])
+            to_delete, to_mark = parse_undelivered_emails(
+                [
+                    {'email_id': '1', 'recipient_email': 'dood@example.com', 'is_permanent': True},
+                    {'email_id': '2', 'recipient_email': 'vol@example.com', 'is_permanent': False},
+                    {'email_id': '3', 'recipient_email': 'spam@example.com', 'is_spam_rejection': True},
+                ]
+            )
             first = json.loads(counts_file.read_text())
             # Tweede 5xx op hetzelfde adres raakt de drempel van 2.
-            _, second_mark = parse_undelivered_emails([
-                {'email_id': '4', 'recipient_email': 'dood@example.com', 'is_permanent': True},
-            ])
+            _, second_mark = parse_undelivered_emails(
+                [
+                    {'email_id': '4', 'recipient_email': 'dood@example.com', 'is_permanent': True},
+                ]
+            )
 
     assert to_delete == ['1', '2', '3'], f'alles moet weg, kreeg {to_delete}'
     assert to_mark == [], f'na één bounce nog niemand undeliverable, kreeg {to_mark}'
@@ -1064,12 +1116,17 @@ def test_marking_undeliverable_respects_a_resubscribe():
 
     with tempfile.TemporaryDirectory() as tmp:
         counts_file = Path(tmp) / 'undelivered.json'
-        counts_file.write_text(json.dumps(
-            {'terug@example.com': {'count': 9, 'permanent_count': 1, 'last_bounce': '2026-01-01'}}))
-        with patch('src.undelivered.undelivered_file', counts_file), \
-                patch('src.undelivered.get_subscriber_status',
-                      return_value={'status': 'daily', 'updated_at': datetime(2026, 6, 1)}), \
-                patch('src.undelivered.update_subscription') as update:
+        counts_file.write_text(
+            json.dumps({'terug@example.com': {'count': 9, 'permanent_count': 1, 'last_bounce': '2026-01-01'}})
+        )
+        with (
+            patch('src.undelivered.undelivered_file', counts_file),
+            patch(
+                'src.undelivered.get_subscriber_status',
+                return_value={'status': 'daily', 'updated_at': datetime(2026, 6, 1)},
+            ),
+            patch('src.undelivered.update_subscription') as update,
+        ):
             mark_undeliverable(['terug@example.com'])
         remaining = json.loads(counts_file.read_text())
 
@@ -1082,8 +1139,14 @@ def test_marking_undeliverable_respects_a_resubscribe():
 # De afhandelaar in de nieuwsbrief-run: twee passes, en niet bij --dry-run
 # ---------------------------------------------------------------------------
 
-def _run_main(dry_run: bool = False, source_emails: int = 2, real_replies: bool = False,
-              selection: dict | None = None, image_index: int = 0):
+
+def _run_main(
+    dry_run: bool = False,
+    source_emails: int = 2,
+    real_replies: bool = False,
+    selection: dict | None = None,
+    image_index: int = 0,
+):
     """Draai main.main() met alles eromheen afgevangen; geeft de aanroeporde terug."""
     from contextlib import ExitStack
 
@@ -1095,6 +1158,7 @@ def _run_main(dry_run: bool = False, source_emails: int = 2, real_replies: bool 
         def fn(*args, **kwargs):
             calls.append(name)
             return result
+
         return fn
 
     articles = _articles(3)
@@ -1103,13 +1167,13 @@ def _run_main(dry_run: bool = False, source_emails: int = 2, real_replies: bool 
         'parse_command_line': MagicMock(return_value=('daily', False, dry_run)),
         'already_sent_today': MagicMock(return_value=False),
         'get_raw_mail_text': MagicMock(return_value='ruwe tekst'),
-        'parse_emails_to_dict': MagicMock(
-            return_value={f'bron {i}': 'tekst' for i in range(source_emails)}),
+        'parse_emails_to_dict': MagicMock(return_value={f'bron {i}': 'tekst' for i in range(source_emails)}),
         'generate_ai_summary': MagicMock(return_value=articles),
         'edit_articles': MagicMock(return_value=articles),
         'check_publishable': MagicMock(return_value=None),
         'select_articles_for_visuals': MagicMock(
-            return_value=selection or {'image_article': 0, 'infographic_article': 1}),
+            return_value=selection or {'image_article': 0, 'infographic_article': 1}
+        ),
         'generate_ai_image': MagicMock(return_value=(image_index, 'https://example.com/i.png')),
         'generate_infographic': MagicMock(return_value=(1, 'https://example.com/g.png')),
         'create_html_email': MagicMock(return_value='<html></html>'),
@@ -1202,6 +1266,7 @@ def test_the_infographic_fallbacks_in_main_are_gone():
 # Verzending: reconnect na een gebroken SMTP-verbinding, en eerlijk tellen
 # ---------------------------------------------------------------------------
 
+
 def _patch_mailer_io(subscribers: list[str]):
     """Patch alles wat send_newsletter buiten SMTP om aanraakt."""
     return [
@@ -1218,6 +1283,7 @@ def test_smtp_reconnects_after_broken_connection():
     """Incident 08:46: verbinding valt weg. Verwacht reconnect, iedereen bezorgd."""
     import smtplib
     from contextlib import ExitStack
+
     from src import mailer
 
     subscribers = [f'user{i}@example.com' for i in range(5)]
@@ -1228,8 +1294,7 @@ def test_smtp_reconnects_after_broken_connection():
     with ExitStack() as stack:
         for p in _patch_mailer_io(subscribers):
             stack.enter_context(p)
-        connect = stack.enter_context(
-            patch('src.mailer.connect_smtp', side_effect=[dead, fresh]))
+        connect = stack.enter_context(patch('src.mailer.connect_smtp', side_effect=[dead, fresh]))
         log = stack.enter_context(patch('src.mailer.lg'))
         mailer.send_newsletter('daily', '<html>[EMAIL]</html>', 'Titel')
 
@@ -1240,18 +1305,95 @@ def test_smtp_reconnects_after_broken_connection():
     print('  PASS test_smtp_reconnects_after_broken_connection')
 
 
+def _imap_connection(dead: bool) -> MagicMock:
+    """Een IMAP-verbinding met één verse mail, of een die bij elke fetch een timeout geeft."""
+    from datetime import datetime
+    from email.utils import format_datetime
+
+    headers = (
+        f'From: Bron <bron@example.com>\r\nDate: {format_datetime(datetime.now(UTC))}\r\nSubject: Nieuws\r\n\r\n'
+    ).encode()
+
+    def uid(command, _uid, query=None):
+        if command == 'search':
+            return 'OK', [b'1']
+        if dead:
+            raise TimeoutError('The read operation timed out')
+        if query == '(FLAGS)':
+            return 'OK', [b'1 (FLAGS ())']
+        if 'HEADER' in query:
+            return 'OK', [(b'1 (BODY[HEADER]', headers)]
+        return 'OK', [(b'1 (RFC822', headers + b'Tekst met https://a.nl https://b.nl https://c.nl')]
+
+    conn = MagicMock()
+    conn.select.return_value = ('OK', [b'1'])
+    conn.uid.side_effect = uid
+    return conn
+
+
+def _fetch_with_connections(*conns: MagicMock):
+    """Draai get_raw_mail_text waarbij elke (re)connect de volgende verbinding oplevert."""
+    from src import gmail
+
+    def connect(self, attempts=3):
+        self.mail = next(pool)
+        return True
+
+    pool = iter(conns)
+    with (
+        tempfile.TemporaryDirectory() as tmp,
+        patch.object(gmail.Mail, 'connect', connect),
+        patch.object(gmail, 'cache_file_prefix', lambda s: str(Path(tmp) / s)),
+        patch.object(gmail, 'LAST_SENT_FILE', Path(tmp) / 'geen.json'),
+        patch('src.gmail.lg') as log,
+    ):
+        return gmail.get_raw_mail_text('daily'), log
+
+
+def test_imap_reconnects_after_a_dead_connection():
+    """Incident 6 oktober: fetches faalden stil, 0 bronmails. Verwacht reconnect en de mail."""
+    text, log = _fetch_with_connections(_imap_connection(dead=True), _imap_connection(dead=False))
+
+    assert text and 'Subject: Nieuws' in text, f'mail niet opgehaald na reconnect: {text!r}'
+    assert log.warning.called, 'een reconnect hoort een WARNING te loggen'
+    assert not log.error.called, f'geslaagde retry mag geen ERROR loggen: {log.error.call_args_list}'
+    print('  PASS test_imap_reconnects_after_a_dead_connection')
+
+
+def test_imap_reports_a_connection_that_stays_dead():
+    """Blijft de verbinding dood, dan een ERROR over IMAP in plaats van stil 0 mails."""
+    text, log = _fetch_with_connections(_imap_connection(dead=True), _imap_connection(dead=True))
+
+    assert not text
+    assert 'IMAP-verbinding verbroken' in str(log.error.call_args), f'verwacht IMAP-ERROR: {log.error.call_args_list}'
+    print('  PASS test_imap_reports_a_connection_that_stays_dead')
+
+
+def test_imap_connects_with_a_timeout():
+    """Zonder timeout hing de socket 15 minuten."""
+    from src import gmail
+
+    with patch('src.gmail.imaplib.IMAP4_SSL') as ssl:
+        gmail.Mail().connect()
+    assert ssl.call_args.kwargs.get('timeout'), f'IMAP4_SSL zonder timeout: {ssl.call_args}'
+    print('  PASS test_imap_connects_with_a_timeout')
+
+
 def test_smtp_reports_actual_count_not_subscriber_count():
     """Incident: log meldde 'Sent to 56 recipients' terwijl er 29 aankwamen."""
     import smtplib
     from contextlib import ExitStack
+
     from src import mailer
 
     subscribers = [f'user{i}@example.com' for i in range(4)]
     server = MagicMock()
+
     # user2 faalt structureel: eerste poging en de retry na reconnect.
     def sendmail(_from, to, _msg):
         if to == ['user2@example.com']:
             raise smtplib.SMTPRecipientsRefused({to[0]: (550, b'no such user')})
+
     server.sendmail.side_effect = sendmail
 
     with ExitStack() as stack:
@@ -1339,6 +1481,9 @@ def main():
         test_main_handles_a_cached_image_that_ignores_the_selection,
         test_the_infographic_fallbacks_in_main_are_gone,
         test_smtp_reconnects_after_broken_connection,
+        test_imap_reconnects_after_a_dead_connection,
+        test_imap_reports_a_connection_that_stays_dead,
+        test_imap_connects_with_a_timeout,
         test_smtp_reports_actual_count_not_subscriber_count,
     ]
     failed = 0

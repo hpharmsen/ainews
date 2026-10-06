@@ -30,6 +30,10 @@ MAX_TOTAL_LEN = 50_000
 # (AlphaSignal levert 1 URL in 8400 tekens) en is de HTML-versie de enige bron van links.
 MIN_URLS_IN_PLAIN = 3
 URL_PATTERN = re.compile(r'https?://')
+# Een hangende socket blokkeerde zonder timeout 15 minuten tot het OS hem afbrak.
+IMAP_TIMEOUT = 60
+# Netwerkfouten (ook socket-timeouts) zijn OSError; een door de server verbroken sessie is abort.
+CONNECTION_ERRORS = (OSError, imaplib.IMAP4.abort)
 # SELECTED_SENDERS = [
 # 'aitidbits+ai-coding@substack.com',
 # 'aiminds@mail.beehiiv.com'
@@ -58,13 +62,13 @@ class Mail:
         """Connect to the IMAP server, met retry op transiente verbindingsfouten."""
         for attempt in range(attempts):
             try:
-                self.mail = imaplib.IMAP4_SSL(self.imap_server, self.imap_port)
+                self.mail = imaplib.IMAP4_SSL(self.imap_server, self.imap_port, timeout=IMAP_TIMEOUT)
                 self.mail.login(self.email_user, self.email_pass)
                 return True
             except Exception as e:
                 # Alleen netwerkblips zijn een retry waard. [Errno 54] Connection reset by peer is
                 # een OSError, een fout wachtwoord een imaplib.IMAP4.error en die gaat niet over.
-                if not isinstance(e, (OSError, imaplib.IMAP4.abort)) or attempt == attempts - 1:
+                if not isinstance(e, CONNECTION_ERRORS) or attempt == attempts - 1:
                     lg.error(f"Failed to connect to IMAP server: {str(e)}")
                     return False
                 wait = 2 * 2 ** attempt
@@ -206,6 +210,8 @@ class Mail:
                 'subject': subject.strip(),
                 'is_starred': is_starred
             }
+        except CONNECTION_ERRORS:
+            raise  # Een dode verbinding is geen kapotte mail; get_raw_mail_text verbindt opnieuw
         except Exception:
             return None
 
@@ -401,23 +407,18 @@ def get_raw_mail_text(schedule: str, cached: bool=False, verbose: bool=False):
         return
 
     lg.info("Fetching emails ...")
-    email_ids = mail.get_emails()
-    if not email_ids:
-        return
-
     from_date = fetch_window_start(schedule)
-
-    candidates = []
-    for email_id in email_ids:
-        details = mail.get_email_details(email_id)
-        if not details or not details.get('date'):
-            continue
-        email_date = details['date']
-        # Make sure email_date is timezone-aware
-        if email_date.tzinfo is None:
-            email_date = email_date.replace(tzinfo=timezone.utc)
-        if email_date >= from_date:
-            candidates.append((email_date, email_id, details))
+    try:
+        candidates = collect_candidates(mail, from_date)
+    except CONNECTION_ERRORS as e:
+        lg.warning(f'IMAP-verbinding verbroken tijdens ophalen: {e}. Opnieuw verbinden...')
+        if not mail.connect():
+            return
+        try:
+            candidates = collect_candidates(mail, from_date)
+        except CONNECTION_ERRORS as e:
+            lg.error(f'IMAP-verbinding verbroken, ook na opnieuw verbinden: {e}')
+            return
 
     # Nieuwste eerst: bij een breder venster mag de cap niet het verse nieuws afkappen.
     text = ""
@@ -439,6 +440,22 @@ def get_raw_mail_text(schedule: str, cached: bool=False, verbose: bool=False):
             f.write(text)
 
     return text
+
+
+def collect_candidates(mail: Mail, from_date: datetime) -> list[tuple]:
+    """(datum, uid, details) van elke mail in het label vanaf from_date."""
+    candidates = []
+    for email_id in mail.get_emails():
+        details = mail.get_email_details(email_id)
+        if not details or not details.get('date'):
+            continue
+        email_date = details['date']
+        # Make sure email_date is timezone-aware
+        if email_date.tzinfo is None:
+            email_date = email_date.replace(tzinfo=timezone.utc)
+        if email_date >= from_date:
+            candidates.append((email_date, email_id, details))
+    return candidates
 
 
 def decode_email_header(header_str: str) -> str:
