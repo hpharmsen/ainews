@@ -234,19 +234,13 @@ def edit_articles(schedule: str, articles: list[dict], cached: bool = True, verb
         prompt = load_prompt('editor',
                              title=article.get('title', ''),
                              summary=article.get('summary', ''))
-        result = None
-        for attempt in range(5):
-            try:
-                result = model.prompt(prompt, response_format=EditedArticle, cached=False)
-                break
-            except Exception as e:
-                wait_time = 5 * (2 ** attempt)
-                lg.warning(f'Editor attempt {attempt + 1}/5 for article {idx} failed: {e}. '
-                           f'Retrying in {wait_time}s...')
-                time.sleep(wait_time)
-        if result is None:
-            raise RuntimeError(f'Editor failed for article {idx} after 5 attempts')
-
+        try:
+            result = retry_prompt(model, prompt, return_json=False, response_format=EditedArticle)
+        except Exception as e:
+            # Weigering of blijvende fout: artikel ongeredigeerd laten staan, de nieuwsbrief gaat door.
+            lg.error(f'Editor failed for article {idx}, left unedited: {type(e).__name__}: {e}')
+            edited.append(article)
+            continue
         ea = EditedArticle(**result) if isinstance(result, dict) else result
         edited.append({
             **article,
@@ -488,12 +482,12 @@ def classify_reply(sender: str, subject: str, body: str | None) -> str:
     return answer['choice']
 
 
-def retry_prompt(model, prompt, return_json: bool = True):
+def retry_prompt(model, prompt, return_json: bool = True, response_format=None):
     """Prompt het model, met retry op transiente fouten. WARNING per poging, daarna doorgooien."""
     attempts = 5
     for attempt in range(attempts):
         try:
-            return model.prompt(prompt, return_json=return_json, cached=False)
+            return model.prompt(prompt, return_json=return_json, response_format=response_format, cached=False)
         except (RatelimitException, ModelOverloadException, ConnectionException, GeneralException) as e:
             # justai verpakt een 529 Overloaded in GeneralException, niet in ModelOverloadException:
             # anthropic's OverloadedError is geen InternalServerError. Vandaar de status-check op de

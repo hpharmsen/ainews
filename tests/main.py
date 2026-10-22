@@ -131,6 +131,28 @@ def test_writes_cache_file():
     print('  PASS test_writes_cache_file')
 
 
+def test_refused_article_left_unedited():
+    """Een weigering wordt niet herhaald; het artikel blijft ongeredigeerd en de rest gaat door."""
+    from justai.models.basemodel import RefusalException
+    with tempfile.TemporaryDirectory() as tmp:
+        tmpdir = Path(tmp)
+        with _patch_cache_prefix(tmpdir):
+            from src.ai import EditedArticle, edit_articles
+
+            mock_instance = MagicMock()
+            mock_instance.prompt.side_effect = [RefusalException(), EditedArticle(title='t2', summary='s2')]
+            original = _sample_articles()
+            with patch('src.ai.Model', return_value=mock_instance), patch('src.ai.time.sleep'), \
+                    patch('src.ai.lg') as log:
+                result = edit_articles('daily', original, cached=False)
+
+            assert mock_instance.prompt.call_count == 2, 'weigering mag niet herhaald worden'
+            assert result[0] == original[0], 'geweigerd artikel moet ongeredigeerd blijven'
+            assert result[1]['title'] == 't2'
+            assert log.error.called, 'weigering moet naar Janitor'
+    print('  PASS test_refused_article_left_unedited')
+
+
 def test_retry_prompt_retries_connection_error():
     """retry_prompt moet ConnectionException opvangen en opnieuw proberen."""
     from justai.models.basemodel import ConnectionException
@@ -1419,6 +1441,7 @@ def main():
         test_preserves_links_and_sources,
         test_handles_dict_response,
         test_writes_cache_file,
+        test_refused_article_left_unedited,
         test_retry_prompt_retries_connection_error,
         test_retry_prompt_exhausts_and_reraises_connection_error,
         test_retry_prompt_still_retries_ratelimit,
