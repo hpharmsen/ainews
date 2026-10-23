@@ -8,7 +8,7 @@ from urllib.parse import parse_qs, urlparse, urlunparse
 import httpx
 from justai import Model
 from justai.models.basemodel import (ConnectionException, GeneralException, ModelOverloadException,
-                                     RatelimitException)
+                                     RatelimitException, RefusalException)
 from justdays import Day
 from pydantic import BaseModel, Field
 from typing import Annotated
@@ -235,9 +235,15 @@ def edit_articles(schedule: str, articles: list[dict], cached: bool = True, verb
                              title=article.get('title', ''),
                              summary=article.get('summary', ''))
         try:
-            result = retry_prompt(model, prompt, return_json=False, response_format=EditedArticle)
+            try:
+                result = retry_prompt(model, prompt, return_json=False, response_format=EditedArticle)
+            except RefusalException as e:
+                # Vaak een vals-positieve veiligheidsweigering; een ander model redigeert het wel.
+                lg.warning(f'Editor refused article {idx}, retrying with {COPY_WRITE_MODEL_NAME}: {e}')
+                result = retry_prompt(Model(COPY_WRITE_MODEL, max_tokens=2000), prompt,
+                                      return_json=False, response_format=EditedArticle)
         except Exception as e:
-            # Weigering of blijvende fout: artikel ongeredigeerd laten staan, de nieuwsbrief gaat door.
+            # Ook de fallback faalt, of een blijvende fout: artikel ongeredigeerd, de nieuwsbrief gaat door.
             lg.error(f'Editor failed for article {idx}, left unedited: {type(e).__name__}: {e}')
             edited.append(article)
             continue

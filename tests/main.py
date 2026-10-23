@@ -131,26 +131,44 @@ def test_writes_cache_file():
     print('  PASS test_writes_cache_file')
 
 
-def test_refused_article_left_unedited():
-    """Een weigering wordt niet herhaald; het artikel blijft ongeredigeerd en de rest gaat door."""
-    from justai.models.basemodel import RefusalException
+def _edit_with_side_effects(*side_effects):
+    """Draai edit_articles met een gemockt model; geeft (resultaat, origineel, mock, log)."""
     with tempfile.TemporaryDirectory() as tmp:
-        tmpdir = Path(tmp)
-        with _patch_cache_prefix(tmpdir):
-            from src.ai import EditedArticle, edit_articles
-
+        with _patch_cache_prefix(Path(tmp)):
+            from src.ai import edit_articles
             mock_instance = MagicMock()
-            mock_instance.prompt.side_effect = [RefusalException(), EditedArticle(title='t2', summary='s2')]
+            mock_instance.prompt.side_effect = side_effects
             original = _sample_articles()
-            with patch('src.ai.Model', return_value=mock_instance), patch('src.ai.time.sleep'), \
-                    patch('src.ai.lg') as log:
+            with patch('src.ai.Model', return_value=mock_instance) as model_cls, \
+                    patch('src.ai.time.sleep'), patch('src.ai.lg') as log:
                 result = edit_articles('daily', original, cached=False)
+    return result, original, mock_instance, model_cls, log
 
-            assert mock_instance.prompt.call_count == 2, 'weigering mag niet herhaald worden'
-            assert result[0] == original[0], 'geweigerd artikel moet ongeredigeerd blijven'
-            assert result[1]['title'] == 't2'
-            assert log.error.called, 'weigering moet naar Janitor'
-    print('  PASS test_refused_article_left_unedited')
+
+def test_refused_article_edited_by_fallback():
+    """Een weigering gaat eenmalig naar COPY_WRITE_MODEL, met alleen een WARNING."""
+    from justai.models.basemodel import RefusalException
+    from src.ai import COPY_WRITE_MODEL, EditedArticle
+    result, _, mock_instance, model_cls, log = _edit_with_side_effects(
+        RefusalException(), EditedArticle(title='t1', summary='s1'), EditedArticle(title='t2', summary='s2'))
+    assert mock_instance.prompt.call_count == 3
+    assert model_cls.call_args_list[1].args[0] == COPY_WRITE_MODEL
+    assert result[0]['title'] == 't1' and result[1]['title'] == 't2'
+    assert log.warning.called and not log.error.called, 'geslaagde fallback hoort niet naar Janitor'
+    print('  PASS test_refused_article_edited_by_fallback')
+
+
+def test_refused_article_left_unedited_when_fallback_fails():
+    """Faalt ook de fallback, dan blijft het artikel ongeredigeerd, volgt lg.error en gaat de rest door."""
+    from justai.models.basemodel import RefusalException
+    from src.ai import EditedArticle
+    result, original, mock_instance, _, log = _edit_with_side_effects(
+        RefusalException(), RefusalException(), EditedArticle(title='t2', summary='s2'))
+    assert mock_instance.prompt.call_count == 3, 'weigering mag niet herhaald worden'
+    assert result[0] == original[0], 'geweigerd artikel moet ongeredigeerd blijven'
+    assert result[1]['title'] == 't2'
+    assert log.error.call_count == 1, 'falende fallback moet naar Janitor'
+    print('  PASS test_refused_article_left_unedited_when_fallback_fails')
 
 
 def test_retry_prompt_retries_connection_error():
@@ -1441,7 +1459,8 @@ def main():
         test_preserves_links_and_sources,
         test_handles_dict_response,
         test_writes_cache_file,
-        test_refused_article_left_unedited,
+        test_refused_article_edited_by_fallback,
+        test_refused_article_left_unedited_when_fallback_fails,
         test_retry_prompt_retries_connection_error,
         test_retry_prompt_exhausts_and_reraises_connection_error,
         test_retry_prompt_still_retries_ratelimit,
