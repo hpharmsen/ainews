@@ -133,24 +133,30 @@ def test_writes_cache_file():
 
 def _edit_with_side_effects(*side_effects):
     """Draai edit_articles met een gemockt model; geeft (resultaat, origineel, mock, log)."""
-    with tempfile.TemporaryDirectory() as tmp:
-        with _patch_cache_prefix(Path(tmp)):
-            from src.ai import edit_articles
-            mock_instance = MagicMock()
-            mock_instance.prompt.side_effect = side_effects
-            original = _sample_articles()
-            with patch('src.ai.Model', return_value=mock_instance) as model_cls, \
-                    patch('src.ai.time.sleep'), patch('src.ai.lg') as log:
-                result = edit_articles('daily', original, cached=False)
+    with tempfile.TemporaryDirectory() as tmp, _patch_cache_prefix(Path(tmp)):
+        from src.ai import edit_articles
+
+        mock_instance = MagicMock()
+        mock_instance.prompt.side_effect = side_effects
+        original = _sample_articles()
+        with (
+            patch('src.ai.Model', return_value=mock_instance) as model_cls,
+            patch('src.ai.time.sleep'),
+            patch('src.ai.lg') as log,
+        ):
+            result = edit_articles('daily', original, cached=False)
     return result, original, mock_instance, model_cls, log
 
 
 def test_refused_article_edited_by_fallback():
     """Een weigering gaat eenmalig naar COPY_WRITE_MODEL, met alleen een WARNING."""
     from justai.models.basemodel import RefusalException
+
     from src.ai import COPY_WRITE_MODEL, EditedArticle
+
     result, _, mock_instance, model_cls, log = _edit_with_side_effects(
-        RefusalException(), EditedArticle(title='t1', summary='s1'), EditedArticle(title='t2', summary='s2'))
+        RefusalException(), EditedArticle(title='t1', summary='s1'), EditedArticle(title='t2', summary='s2')
+    )
     assert mock_instance.prompt.call_count == 3
     assert model_cls.call_args_list[1].args[0] == COPY_WRITE_MODEL
     assert result[0]['title'] == 't1' and result[1]['title'] == 't2'
@@ -161,9 +167,12 @@ def test_refused_article_edited_by_fallback():
 def test_refused_article_left_unedited_when_fallback_fails():
     """Faalt ook de fallback, dan blijft het artikel ongeredigeerd, volgt lg.error en gaat de rest door."""
     from justai.models.basemodel import RefusalException
+
     from src.ai import EditedArticle
+
     result, original, mock_instance, _, log = _edit_with_side_effects(
-        RefusalException(), RefusalException(), EditedArticle(title='t2', summary='s2'))
+        RefusalException(), RefusalException(), EditedArticle(title='t2', summary='s2')
+    )
     assert mock_instance.prompt.call_count == 3, 'weigering mag niet herhaald worden'
     assert result[0] == original[0], 'geweigerd artikel moet ongeredigeerd blijven'
     assert result[1]['title'] == 't2'
@@ -1419,6 +1428,50 @@ def test_imap_connects_with_a_timeout():
     print('  PASS test_imap_connects_with_a_timeout')
 
 
+def _db_attempts(*fails: bool):
+    """Laat add_to_database draaien met per poging een geslaagde of falende verbinding."""
+    from sqlalchemy.exc import OperationalError
+
+    from src import database
+
+    metadata = MagicMock()
+    metadata.tables = {'nieuwsbrief_newsletter': MagicMock()}
+    timeout = OperationalError('connect', {}, Exception('Operation timed out'))
+    metadata.reflect.side_effect = [timeout if fail else None for fail in fails]
+    with (
+        patch.dict(os.environ, {'DATABASE_URL': 'postgresql://u:geheim@host/db'}),
+        patch('src.database.create_engine') as engine,
+        patch('src.database.MetaData', return_value=metadata),
+        patch('src.database.pg_insert'),
+        patch('src.database.time'),
+        patch('src.database.lg') as log,
+    ):
+        database.add_to_database('daily', 'titel', '<html></html>', 'https://example.com/i.png')
+    return engine, log
+
+
+def test_db_retries_a_timed_out_connection():
+    """Incident 31 oktober: RDS-timeout. Een tweede poging hoort de nieuwsbrief op te slaan."""
+    engine, log = _db_attempts(True, False)
+
+    assert engine.return_value.begin.called, 'nieuwsbrief niet opgeslagen na retry'
+    assert log.warning.called, 'een retry hoort een WARNING te loggen'
+    assert not log.error.called, f'geslaagde retry mag geen ERROR loggen: {log.error.call_args_list}'
+    assert engine.call_args.kwargs.get('connect_args', {}).get('connect_timeout'), (
+        'create_engine zonder connect_timeout'
+    )
+    print('  PASS test_db_retries_a_timed_out_connection')
+
+
+def test_db_failure_does_not_stop_the_run_or_leak_the_password():
+    """Blijft de database weg, dan een ERROR zonder wachtwoord en geen sys.exit voor de verzending."""
+    _, log = _db_attempts(True, True, True)
+
+    assert log.error.called, 'een onbereikbare database hoort een ERROR te loggen'
+    assert 'geheim' not in str(log.error.call_args_list), 'het wachtwoord staat in de log'
+    print('  PASS test_db_failure_does_not_stop_the_run_or_leak_the_password')
+
+
 def test_smtp_reports_actual_count_not_subscriber_count():
     """Incident: log meldde 'Sent to 56 recipients' terwijl er 29 aankwamen."""
     import smtplib
@@ -1527,6 +1580,8 @@ def main():
         test_imap_reports_a_connection_that_stays_dead,
         test_imap_connects_with_a_timeout,
         test_smtp_reports_actual_count_not_subscriber_count,
+        test_db_retries_a_timed_out_connection,
+        test_db_failure_does_not_stop_the_run_or_leak_the_password,
     ]
     failed = 0
     for t in tests:

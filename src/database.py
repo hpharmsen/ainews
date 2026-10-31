@@ -1,15 +1,17 @@
 import json
 import os
 import re
-import sys
-from datetime import datetime, timezone, timedelta
+import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from sqlalchemy import create_engine, MetaData, text, select, desc, func, and_
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 from justdays import Day
-
 from justlog import lg
+from sqlalchemy import MetaData, and_, create_engine, func
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import OperationalError
+
+DB_CONNECT_TIMEOUT = 10  # seconden; zonder timeout hangt een dode RDS-host minutenlang
 
 
 def normalize_db_url(db_url):
@@ -19,31 +21,27 @@ def normalize_db_url(db_url):
     return db_url
 
 
-def db_connect():
-    """Connect to the PostgreSQL database and return the engine and podcast table."""
-    # Get and normalize the database URL
-    db_url = normalize_db_url(os.getenv("DATABASE_URL"))
-    assert db_url, "DATABASE_URL environment variable not set"
+def db_connect(attempts: int = 3):
+    """Connect to the PostgreSQL database and return the engine and newsletter table."""
+    db_url = normalize_db_url(os.getenv('DATABASE_URL'))
+    assert db_url, 'DATABASE_URL environment variable not set'
 
-    try:
-        engine = create_engine(db_url)
+    engine = create_engine(db_url, connect_args={'connect_timeout': DB_CONNECT_TIMEOUT})
+    for attempt in range(attempts):
+        try:
+            metadata = MetaData()
+            metadata.reflect(bind=engine)
+            break
+        except OperationalError as e:
+            # Een timeout op de RDS-host is meestal een tijdelijke hapering.
+            if attempt == attempts - 1:
+                raise
+            wait = 2 * 2**attempt
+            lg.warning(f'Database connect attempt {attempt + 1}/{attempts} failed: {e}. Retrying in {wait}s...')
+            time.sleep(wait)
 
-        # Test the connection
-        with engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
-
-        metadata = MetaData()
-        metadata.reflect(bind=engine)
-
-        # Get the podcast table
-        assert 'nieuwsbrief_newsletter' in metadata.tables, "Table 'nieuwsbrief_newsletter' not found in the database"
-
-        newsletter_table = metadata.tables['nieuwsbrief_newsletter']
-        return engine, newsletter_table
-
-    except Exception as e:
-        lg.error(f"Error connecting to the database: {e}\nDatabase URL: {db_url}")
-        sys.exit(1)
+    assert 'nieuwsbrief_newsletter' in metadata.tables, "Table 'nieuwsbrief_newsletter' not found in the database"
+    return engine, metadata.tables['nieuwsbrief_newsletter']
 
 
 def add_to_database(schedule, title, newsletter_html, image_url):
@@ -51,38 +49,46 @@ def add_to_database(schedule, title, newsletter_html, image_url):
     Voeg een nieuwsbrief toe aan de database, waarbij er maar één per dag per schedule kan bestaan.
     Als er al een nieuwsbrief met dezelfde schedule op dezelfde dag bestaat, wordt deze vervangen.
     Gebruikt de Amsterdam tijdzone voor de datumvergelijking.
+    Is de database onbereikbaar, dan logt dit een ERROR en gaat de verzending gewoon door.
     """
-    engine, table = db_connect()
-    
+    try:
+        engine, table = db_connect()
+    except OperationalError as e:
+        lg.error(f'Error connecting to the database, newsletter not stored: {e}')
+        return
+
     # Huidige tijd in Amsterdam tijdzone
     amsterdam_tz = timezone(timedelta(hours=2))  # CEST (UTC+2)
     now = datetime.now(amsterdam_tz)
-    
+
     with engine.begin() as conn:
         # Delete any existing newsletter with the same schedule on the same day
-        delete_stmt = table.delete().where(
-            and_(
-                table.c.schedule == schedule,
-                func.date(table.c.sent) == now.date()
-            )
-        )
+        delete_stmt = table.delete().where(and_(table.c.schedule == schedule, func.date(table.c.sent) == now.date()))
         conn.execute(delete_stmt)
-        
+
         # Insert the new newsletter
         insert_stmt = pg_insert(table).values(
-            schedule=schedule,
-            title=title,
-            sent=now,
-            text=newsletter_html,
-            image_url=image_url
+            schedule=schedule, title=title, sent=now, text=newsletter_html, image_url=image_url
         )
         conn.execute(insert_stmt)
-    
-    lg.info(f"✅ Nieuwsbrief toegevoegd aan de database (heeft eventuele bestaande voor {now.date()} vervangen).")
+
+    lg.info(f'✅ Nieuwsbrief toegevoegd aan de database (heeft eventuele bestaande voor {now.date()} vervangen).')
 
 
-MONTHS_NL = ['januari', 'februari', 'maart', 'april', 'mei', 'juni',
-             'juli', 'augustus', 'september', 'oktober', 'november', 'december']
+MONTHS_NL = [
+    'januari',
+    'februari',
+    'maart',
+    'april',
+    'mei',
+    'juni',
+    'juli',
+    'augustus',
+    'september',
+    'oktober',
+    'november',
+    'december',
+]
 
 
 def get_last_newsletter_summaries(schedule: str, limit: int = 5) -> str:
@@ -122,7 +128,7 @@ def get_last_newsletter_summaries(schedule: str, limit: int = 5) -> str:
 
 
 def cache_file_prefix(schedule: str) -> str:
-    name =  str(Day()) if schedule == "daily" else f"week{Day().week_number()}"
+    name = str(Day()) if schedule == 'daily' else f'week{Day().week_number()}'
     return str(Path(__file__).parent.parent / 'cache' / name)
 
 
