@@ -1472,6 +1472,50 @@ def test_db_failure_does_not_stop_the_run_or_leak_the_password():
     print('  PASS test_db_failure_does_not_stop_the_run_or_leak_the_password')
 
 
+def _subscriber_attempts(*fails: bool):
+    """Laat send_newsletter abonnees ophalen met per poging een geslaagde of falende verbinding."""
+    from sqlalchemy.exc import OperationalError
+
+    from src import mailer
+
+    metadata = MagicMock()
+    metadata.tables = {'nieuwsbrief_subscriber': _subscriber_table()}
+    timeout = OperationalError('connect', {}, Exception('Operation timed out'))
+    metadata.reflect.side_effect = [timeout if fail else None for fail in fails]
+    with (
+        patch.dict(os.environ, {'DATABASE_URL': 'postgresql://u:geheim@host/db'}),
+        patch('src.database.create_engine') as engine,
+        patch('src.database.MetaData', return_value=metadata),
+        patch('src.database.time'),
+        patch('src.database.lg'),
+        patch('src.mailer.get_mailerlog', return_value=set()) as mailerlog,
+        patch('src.mailer.lg') as log,
+        patch('src.mailer.update_last_sent_timestamp'),
+    ):
+        mailer.send_newsletter('daily', '<html></html>', 'Titel')
+    return mailerlog, log
+
+
+def test_subscribers_retry_a_timed_out_connection():
+    """Incident 1 november: RDS-timeout bij get_subscribers. Een tweede poging hoort de lijst op te halen."""
+    mailerlog, log = _subscriber_attempts(True, False)
+
+    assert mailerlog.called, 'verzending niet doorgegaan na geslaagde retry'
+    assert not log.error.called, f'geslaagde retry mag geen ERROR loggen: {log.error.call_args_list}'
+    print('  PASS test_subscribers_retry_a_timed_out_connection')
+
+
+def test_unreachable_subscriber_db_logs_one_error_without_crashing():
+    """Blijft de database weg, dan een nette ERROR met de herstelactie in plaats van een crash."""
+    mailerlog, log = _subscriber_attempts(True, True, True)
+
+    assert not mailerlog.called, 'verzending ging door zonder abonneelijst'
+    assert log.error.call_count == 1, f'verwacht precies een ERROR: {log.error.call_args_list}'
+    assert '--cached' in str(log.error.call_args), 'foutmelding noemt de herstelactie niet'
+    assert 'geheim' not in str(log.error.call_args), 'het wachtwoord staat in de log'
+    print('  PASS test_unreachable_subscriber_db_logs_one_error_without_crashing')
+
+
 def test_smtp_reports_actual_count_not_subscriber_count():
     """Incident: log meldde 'Sent to 56 recipients' terwijl er 29 aankwamen."""
     import smtplib
@@ -1582,6 +1626,8 @@ def main():
         test_smtp_reports_actual_count_not_subscriber_count,
         test_db_retries_a_timed_out_connection,
         test_db_failure_does_not_stop_the_run_or_leak_the_password,
+        test_subscribers_retry_a_timed_out_connection,
+        test_unreachable_subscriber_db_logs_one_error_without_crashing,
     ]
     failed = 0
     for t in tests:

@@ -21,8 +21,8 @@ def normalize_db_url(db_url):
     return db_url
 
 
-def db_connect(attempts: int = 3):
-    """Connect to the PostgreSQL database and return the engine and newsletter table."""
+def connect_with_retry(attempts: int = 3):
+    """Connect to the PostgreSQL database with timeout and retry; return the engine and reflected tables."""
     db_url = normalize_db_url(os.getenv('DATABASE_URL'))
     assert db_url, 'DATABASE_URL environment variable not set'
 
@@ -39,9 +39,14 @@ def db_connect(attempts: int = 3):
             wait = 2 * 2**attempt
             lg.warning(f'Database connect attempt {attempt + 1}/{attempts} failed: {e}. Retrying in {wait}s...')
             time.sleep(wait)
+    return engine, metadata.tables
 
-    assert 'nieuwsbrief_newsletter' in metadata.tables, "Table 'nieuwsbrief_newsletter' not found in the database"
-    return engine, metadata.tables['nieuwsbrief_newsletter']
+
+def db_connect():
+    """Connect to the PostgreSQL database and return the engine and newsletter table."""
+    engine, tables = connect_with_retry()
+    assert 'nieuwsbrief_newsletter' in tables, "Table 'nieuwsbrief_newsletter' not found in the database"
+    return engine, tables['nieuwsbrief_newsletter']
 
 
 def add_to_database(schedule, title, newsletter_html, image_url):

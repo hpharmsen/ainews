@@ -9,6 +9,7 @@ from email.mime.multipart import MIMEMultipart
 from email.utils import formataddr, make_msgid
 
 from justdays import Day
+from sqlalchemy.exc import OperationalError
 
 from src.subscribers import get_subscribers
 from src.gmail import Mail
@@ -158,7 +159,11 @@ def get_mailerlog(day:Day) -> set:
 
 
 def send_newsletter(schedule: str, newsletter_html: str, title: str):
-    subscribers = get_subscribers(schedule)
+    try:
+        subscribers = get_subscribers(schedule)
+    except OperationalError as e:
+        lg.error(f'Database onbereikbaar, nieuwsbrief niet verzonden. Opnieuw draaien met --cached. {e}')
+        return
     already_mailed = get_mailerlog(Day())
     subscribers = [s for s in subscribers if s not in already_mailed]
 
