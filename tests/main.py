@@ -1428,12 +1428,13 @@ def test_imap_connects_with_a_timeout():
     print('  PASS test_imap_connects_with_a_timeout')
 
 
-def _db_attempts(*fails: bool):
+def _db_attempts(*fails: bool, pending_file: Path | None = None, title: str = 'titel'):
     """Laat add_to_database draaien met per poging een geslaagde of falende verbinding."""
     from sqlalchemy.exc import OperationalError
 
     from src import database
 
+    pending_file = pending_file or Path(tempfile.mkdtemp()) / 'pending_db.json'
     metadata = MagicMock()
     metadata.tables = {'nieuwsbrief_newsletter': MagicMock()}
     timeout = OperationalError('connect', {}, Exception('Operation timed out'))
@@ -1442,11 +1443,13 @@ def _db_attempts(*fails: bool):
         patch.dict(os.environ, {'DATABASE_URL': 'postgresql://u:geheim@host/db'}),
         patch('src.database.create_engine') as engine,
         patch('src.database.MetaData', return_value=metadata),
-        patch('src.database.pg_insert'),
+        patch('src.database.pg_insert') as insert,
         patch('src.database.time'),
         patch('src.database.lg') as log,
+        patch('src.database.PENDING_FILE', pending_file),
     ):
-        database.add_to_database('daily', 'titel', '<html></html>', 'https://example.com/i.png')
+        database.add_to_database('daily', title, '<html></html>', 'https://example.com/i.png')
+    engine.insert = insert
     return engine, log
 
 
@@ -1464,12 +1467,28 @@ def test_db_retries_a_timed_out_connection():
 
 
 def test_db_failure_does_not_stop_the_run_or_leak_the_password():
-    """Blijft de database weg, dan een ERROR zonder wachtwoord en geen sys.exit voor de verzending."""
+    """Blijft de database weg, dan een WARNING zonder wachtwoord en geen sys.exit voor de verzending."""
     _, log = _db_attempts(True, True, True)
 
-    assert log.error.called, 'een onbereikbare database hoort een ERROR te loggen'
-    assert 'geheim' not in str(log.error.call_args_list), 'het wachtwoord staat in de log'
+    assert not log.error.called, f'de volgende run haalt het in, dus geen ERROR: {log.error.call_args_list}'
+    assert 'geheim' not in str(log.warning.call_args_list), 'het wachtwoord staat in de log'
     print('  PASS test_db_failure_does_not_stop_the_run_or_leak_the_password')
+
+
+def test_db_failure_is_stored_by_the_next_run():
+    """Incident 1 november: de nieuwsbrief ontbrak in het archief. De volgende run slaat hem alsnog op."""
+    pending_file = Path(tempfile.mkdtemp()) / 'pending_db.json'
+    _db_attempts(True, True, True, pending_file=pending_file, title='gisteren')
+    pending = json.loads(pending_file.read_text())
+    assert [n['title'] for n in pending] == ['gisteren'], f'niet bewaard: {pending}'
+
+    engine, _ = _db_attempts(False, pending_file=pending_file, title='vandaag')
+    titles = [c.kwargs['title'] for c in engine.insert.return_value.values.call_args_list]
+    assert titles == ['gisteren', 'vandaag'], f'opgeslagen: {titles}'
+    sent = engine.insert.return_value.values.call_args_list[0].kwargs['sent']
+    assert sent.isoformat() == pending[0]['sent'], 'oorspronkelijke datum niet behouden'
+    assert not pending_file.exists(), 'pending-bestand niet opgeruimd'
+    print('  PASS test_db_failure_is_stored_by_the_next_run')
 
 
 def _subscriber_attempts(*fails: bool):
@@ -1626,6 +1645,7 @@ def main():
         test_smtp_reports_actual_count_not_subscriber_count,
         test_db_retries_a_timed_out_connection,
         test_db_failure_does_not_stop_the_run_or_leak_the_password,
+        test_db_failure_is_stored_by_the_next_run,
         test_subscribers_retry_a_timed_out_connection,
         test_unreachable_subscriber_db_logs_one_error_without_crashing,
     ]

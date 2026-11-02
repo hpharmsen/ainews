@@ -49,35 +49,50 @@ def db_connect():
     return engine, tables['nieuwsbrief_newsletter']
 
 
+PENDING_FILE = Path(__file__).parent.parent / 'cache' / 'pending_db.json'
+
+
 def add_to_database(schedule, title, newsletter_html, image_url):
     """
     Voeg een nieuwsbrief toe aan de database, waarbij er maar één per dag per schedule kan bestaan.
     Als er al een nieuwsbrief met dezelfde schedule op dezelfde dag bestaat, wordt deze vervangen.
     Gebruikt de Amsterdam tijdzone voor de datumvergelijking.
-    Is de database onbereikbaar, dan logt dit een ERROR en gaat de verzending gewoon door.
+    Is de database onbereikbaar, dan gaat de nieuwsbrief naar PENDING_FILE en slaat de volgende
+    run hem alsnog op, met de oorspronkelijke datum. De verzending gaat gewoon door.
     """
+    amsterdam_tz = timezone(timedelta(hours=2))  # CEST (UTC+2)
+    newsletter = dict(
+        schedule=schedule,
+        title=title,
+        sent=datetime.now(amsterdam_tz).isoformat(),
+        text=newsletter_html,
+        image_url=image_url,
+    )
+    pending = json.loads(PENDING_FILE.read_text()) if PENDING_FILE.exists() else []
+    pending.append(newsletter)
+
     try:
         engine, table = db_connect()
     except OperationalError as e:
-        lg.error(f'Error connecting to the database, newsletter not stored: {e}')
+        # Geen ERROR: de volgende run haalt dit in. Blijft de database weg, dan faalt het
+        # ophalen van de abonnees ook en dat logt wel een ERROR.
+        lg.warning(f'Database onbereikbaar, {len(pending)} nieuwsbrief/brieven bewaard voor de volgende run: {e}')
+        PENDING_FILE.write_text(json.dumps(pending))
         return
 
-    # Huidige tijd in Amsterdam tijdzone
-    amsterdam_tz = timezone(timedelta(hours=2))  # CEST (UTC+2)
-    now = datetime.now(amsterdam_tz)
-
     with engine.begin() as conn:
-        # Delete any existing newsletter with the same schedule on the same day
-        delete_stmt = table.delete().where(and_(table.c.schedule == schedule, func.date(table.c.sent) == now.date()))
-        conn.execute(delete_stmt)
-
-        # Insert the new newsletter
-        insert_stmt = pg_insert(table).values(
-            schedule=schedule, title=title, sent=now, text=newsletter_html, image_url=image_url
-        )
-        conn.execute(insert_stmt)
-
-    lg.info(f'✅ Nieuwsbrief toegevoegd aan de database (heeft eventuele bestaande voor {now.date()} vervangen).')
+        for n in pending:
+            sent = datetime.fromisoformat(n['sent'])
+            # Delete any existing newsletter with the same schedule on the same day
+            conn.execute(
+                table.delete().where(and_(table.c.schedule == n['schedule'], func.date(table.c.sent) == sent.date()))
+            )
+            conn.execute(pg_insert(table).values(**n | {'sent': sent}))
+            lg.info(
+                f'✅ Nieuwsbrief {n["schedule"]} toegevoegd aan de database '
+                f'(heeft eventuele bestaande voor {sent.date()} vervangen).'
+            )
+    PENDING_FILE.unlink(missing_ok=True)
 
 
 MONTHS_NL = [

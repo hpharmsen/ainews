@@ -58,7 +58,10 @@ ainews/
 9. `ai.generate_ai_image` → header image + S3-URL
 10. `ai.generate_infographic` → infographic + S3-URL
 11. `formatter.create_html_email` → HTML
-12. `database.add_to_database` → DB-record (gebruikt bij dedupe in volgende run)
+12. `database.add_to_database` → DB-record (gebruikt bij dedupe in volgende run). Is de
+    database onbereikbaar, dan gaat de nieuwsbrief naar `cache/pending_db.json` met een
+    WARNING, en slaat de volgende run hem alsnog op met de oorspronkelijke datum. De
+    scheduler draait elke job één keer per dag en herhaalt een mislukte run niet
 13. `mailer.send_newsletter` → SMTP-verzending, met reconnect per ontvanger
 14. `replies.handle_replies` → tweede pass, 60 seconden na verzending. Bounces en
     delay-meldingen komen pas ná verzending binnen
