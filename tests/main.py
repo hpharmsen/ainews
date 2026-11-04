@@ -1,5 +1,6 @@
 """Lichtgewicht test-runner. Draai met `python tests/main.py`."""
 
+import imaplib
 import json
 import os
 import sys
@@ -1021,6 +1022,44 @@ def test_replies_survives_a_failing_imap_connection():
     print('  PASS test_replies_survives_a_failing_imap_connection')
 
 
+def _broken_pipe(*_args):
+    raise imaplib.IMAP4.abort('socket error: [Errno 32] Broken pipe')
+
+
+def test_replies_keeps_the_timestamp_when_imap_breaks():
+    """Incident 4 november: 18 berichten op een dode socket, toch schoof de tijdstempel op."""
+    from src.gmail import Mail
+
+    with tempfile.TemporaryDirectory() as tmp:
+        mail = _fake_mail({})
+        mail.mail.uid.side_effect = lambda cmd, *a: ('OK', [b'6 7']) if cmd == 'search' else _broken_pipe()
+        mail.get_message.side_effect = lambda uid: Mail.get_message(mail, uid)
+        with patch('src.replies.lg') as rlg, patch('src.gmail.lg') as glg:
+            r = _run_handler(Path(tmp), mail, 'hp', seen='2026-01-01T00:00:00+00:00')
+
+    assert r['stamp'] == '2026-01-01T00:00:00+00:00', f'tijdstempel schoof op naar {r["stamp"]}'
+    errors = rlg.error.call_args_list + glg.error.call_args_list
+    assert len(errors) == 1, f'verwacht 1 ERROR voor het hele incident, kreeg {errors}'
+    print('  PASS test_replies_keeps_the_timestamp_when_imap_breaks')
+
+
+def test_replies_reconnects_after_a_broken_connection():
+    """Eén verbroken verbinding is een WARNING en een reconnect, de pass gaat gewoon door."""
+    with tempfile.TemporaryDirectory() as tmp:
+        messages = {'3': _reply_message('iemand@example.com', 'vraag', 'hoi')}
+        mail = _fake_mail(messages)
+        fetches = iter([_broken_pipe])
+        mail.get_message.side_effect = lambda uid: next(fetches, messages.get)(uid)
+        with patch('src.replies.lg') as lg_mock, patch('src.gmail.lg') as glg:
+            r = _run_handler(Path(tmp), mail, 'hp', seen='2026-01-01T00:00:00+00:00')
+
+    assert not lg_mock.error.called and not glg.error.called, f'retry gaf ERROR: {lg_mock.error.call_args_list}'
+    assert glg.warning.called or lg_mock.warning.called, 'een reconnect hoort een WARNING te loggen'
+    assert r['classify'].call_count == 1, 'het bericht hoort na de reconnect alsnog verwerkt te worden'
+    assert r['stamp'] != '2026-01-01T00:00:00+00:00', 'geslaagde pass hoort de tijdstempel op te schuiven'
+    print('  PASS test_replies_reconnects_after_a_broken_connection')
+
+
 def test_replies_advances_the_timestamp_on_an_empty_label():
     """Een leeg label is geen fout, en de pass is wel geslaagd."""
     with tempfile.TemporaryDirectory() as tmp:
@@ -1354,8 +1393,8 @@ def test_smtp_reconnects_after_broken_connection():
     print('  PASS test_smtp_reconnects_after_broken_connection')
 
 
-def _imap_connection(dead: bool) -> MagicMock:
-    """Een IMAP-verbinding met één verse mail, of een die bij elke fetch een timeout geeft."""
+def _imap_connection(dead: bool, body_dead: bool = False) -> MagicMock:
+    """Een IMAP-verbinding met één verse mail, of een die bij elke fetch (of alleen de tekst) faalt."""
     from datetime import datetime
     from email.utils import format_datetime
 
@@ -1372,6 +1411,8 @@ def _imap_connection(dead: bool) -> MagicMock:
             return 'OK', [b'1 (FLAGS ())']
         if 'HEADER' in query:
             return 'OK', [(b'1 (BODY[HEADER]', headers)]
+        if body_dead:
+            raise imaplib.IMAP4.abort('socket error: [Errno 32] Broken pipe')
         return 'OK', [(b'1 (RFC822', headers + b'Tekst met https://a.nl https://b.nl https://c.nl')]
 
     conn = MagicMock()
@@ -1416,6 +1457,43 @@ def test_imap_reports_a_connection_that_stays_dead():
     assert not text
     assert 'IMAP-verbinding verbroken' in str(log.error.call_args), f'verwacht IMAP-ERROR: {log.error.call_args_list}'
     print('  PASS test_imap_reports_a_connection_that_stays_dead')
+
+
+def test_imap_reconnects_when_a_body_fetch_breaks():
+    """Incident 4 november: Broken pipe bij het ophalen van de tekst. Verwacht reconnect en de tekst."""
+    text, log = _fetch_with_connections(_imap_connection(dead=False, body_dead=True), _imap_connection(dead=False))
+
+    assert text and 'Tekst met' in text, f'mailtekst niet opgehaald na reconnect: {text!r}'
+    assert log.warning.called, 'een reconnect hoort een WARNING te loggen'
+    assert not log.error.called, f'geslaagde retry mag geen ERROR loggen: {log.error.call_args_list}'
+    print('  PASS test_imap_reconnects_when_a_body_fetch_breaks')
+
+
+def test_imap_skips_a_body_that_stays_unreachable():
+    """Blijft de tekst onbereikbaar, dan één ERROR en geen 'None' als bron in de prompt."""
+    text, log = _fetch_with_connections(
+        _imap_connection(dead=False, body_dead=True), _imap_connection(dead=False, body_dead=True)
+    )
+
+    assert 'None' not in (text or ''), f'None als mailtekst in de bron: {text!r}'
+    assert log.error.call_count == 1, f'verwacht 1 ERROR, kreeg {log.error.call_args_list}'
+    print('  PASS test_imap_skips_a_body_that_stays_unreachable')
+
+
+def test_imap_fetch_error_has_a_stable_log_template():
+    """Het uid in de logregel maakte van één incident 16 Janitor-issues: justlog groepeert op de regel."""
+    from src.gmail import Mail
+
+    mail = Mail()
+    mail.mail = MagicMock()
+    mail.mail.uid.side_effect = ValueError('kapot bericht')
+    with patch('src.gmail.lg') as log:
+        mail.get_message('6')
+        mail.get_message('7')
+
+    templates = {c.args[0] for c in log.error.call_args_list}
+    assert log.error.call_count == 2 and len(templates) == 1, f'logregels verschillen: {log.error.call_args_list}'
+    print('  PASS test_imap_fetch_error_has_a_stable_log_template')
 
 
 def test_imap_connects_with_a_timeout():
@@ -1562,6 +1640,7 @@ def test_smtp_reports_actual_count_not_subscriber_count():
     completed = ' '.join(str(c) for c in log.info.call_args_list)
     assert 'Sent to 3 of 4' in completed, f'oneerlijke telling in afsluitregel: {completed}'
 
+    assert log.error.call_count == 1, f'één samenvattende ERROR, niet één per abonnee: {log.error.call_args_list}'
     errors = ' '.join(str(c) for c in log.error.call_args_list)
     assert 'user2@example.com' in errors, 'gemiste abonnee wordt niet naar Janitor gemeld'
     assert '--resend' in errors, 'foutmelding noemt de herstelactie niet'
@@ -1622,6 +1701,8 @@ def main():
         test_replies_skips_its_own_mail,
         test_replies_survives_a_failing_classification,
         test_replies_survives_a_failing_imap_connection,
+        test_replies_keeps_the_timestamp_when_imap_breaks,
+        test_replies_reconnects_after_a_broken_connection,
         test_replies_advances_the_timestamp_on_an_empty_label,
         test_replies_processes_everything_without_a_timestamp_file,
         test_replies_leaves_hp_mail_untouched,
@@ -1641,6 +1722,9 @@ def main():
         test_smtp_reconnects_after_broken_connection,
         test_imap_reconnects_after_a_dead_connection,
         test_imap_reports_a_connection_that_stays_dead,
+        test_imap_reconnects_when_a_body_fetch_breaks,
+        test_imap_skips_a_body_that_stays_unreachable,
+        test_imap_fetch_error_has_a_stable_log_template,
         test_imap_connects_with_a_timeout,
         test_smtp_reports_actual_count_not_subscriber_count,
         test_db_retries_a_timed_out_connection,

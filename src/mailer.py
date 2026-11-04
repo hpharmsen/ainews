@@ -214,7 +214,8 @@ def send_newsletter(schedule: str, newsletter_html: str, title: str):
                 if attempt == 0:
                     lg.warning(f"SMTP-fout bij {recipient}: {e}. Opnieuw verbinden...")
                 else:
-                    lg.error(f"Verzending naar {recipient} definitief mislukt: {e}")
+                    # WARNING: de ERROR met alle gemiste adressen volgt na de lus, één issue per run
+                    lg.warning(f"Verzending naar {recipient} definitief mislukt: {e}")
                     failed.append(recipient)
 
         # Rate limiting

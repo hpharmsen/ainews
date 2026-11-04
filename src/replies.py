@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 from justlog import lg
 
 from src.ai import classify_reply
-from src.gmail import Mail, decode_email_header, html_to_text
+from src.gmail import Mail, decode_email_header, html_to_text, retry_once
 from src.subscribers import get_subscriber_status, update_subscription
 from src.undelivered import mark_undeliverable, parse_undelivered_emails
 
@@ -156,6 +156,28 @@ def act_on(mail: Mail, uid: str, sender: str, category: str, msg, body: str) -> 
     raise ValueError(f'onbekende categorie {category!r} voor {sender}')
 
 
+def process_label(mail: Mail, since: datetime) -> tuple[int, int]:
+    """Handel de berichten in het label af die nieuwer zijn dan since: (afgehandeld, totaal)."""
+    handled = 0
+    uids = label_uids(mail)
+    for uid in uids:
+        msg = mail.get_message(uid)
+        if msg is None:
+            lg.warning(f'Bericht {uid} in {LABEL} niet op te halen, overgeslagen')
+            continue
+        sender = parseaddr(msg.get('From', ''))[1].lower()
+        if not sender or sender.endswith(OWN_DOMAIN):
+            continue
+        if message_date(msg) <= since:
+            continue
+        body = message_text(msg)
+        subject = decode_email_header(msg.get('Subject', '')).strip()
+        category = classify_reply(sender, subject, body)
+        if act_on(mail, uid, sender, category, msg, body):
+            handled += 1
+    return handled, len(uids)
+
+
 def handle_replies() -> None:
     """Eén pass over het label. Gooit nooit iets door naar de aanroeper."""
     started = datetime.now(timezone.utc)
@@ -165,25 +187,10 @@ def handle_replies() -> None:
         if not mail.connect():
             lg.error(f'Afhandelaar kon niet verbinden met IMAP, label {LABEL} niet verwerkt')
             return
-        handled = 0
-        uids = label_uids(mail)
-        for uid in uids:
-            msg = mail.get_message(uid)
-            if msg is None:
-                lg.warning(f'Bericht {uid} in {LABEL} niet op te halen, overgeslagen')
-                continue
-            sender = parseaddr(msg.get('From', ''))[1].lower()
-            if not sender or sender.endswith(OWN_DOMAIN):
-                continue
-            if message_date(msg) <= since:
-                continue
-            body = message_text(msg)
-            subject = decode_email_header(msg.get('Subject', '')).strip()
-            category = classify_reply(sender, subject, body)
-            if act_on(mail, uid, sender, category, msg, body):
-                handled += 1
+        # Een tweede breuk valt door naar de except: één ERROR en de tijdstempel blijft staan
+        handled, total = retry_once(mail, lambda: process_label(mail, since), LABEL)
         save_last_pass(started)
-        lg.info(f'Label {LABEL}: {handled} van {len(uids)} berichten afgehandeld')
+        lg.info(f'Label {LABEL}: {handled} van {total} berichten afgehandeld')
     except Exception as e:
         lg.error(f'Fout bij het afhandelen van label {LABEL} - {e}')
     finally:
