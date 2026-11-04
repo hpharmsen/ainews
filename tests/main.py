@@ -1640,6 +1640,7 @@ def test_smtp_reports_actual_count_not_subscriber_count():
     completed = ' '.join(str(c) for c in log.info.call_args_list)
     assert 'Sent to 3 of 4' in completed, f'oneerlijke telling in afsluitregel: {completed}'
 
+    assert log.error.call_count == 1, f'één samenvattende ERROR, niet één per abonnee: {log.error.call_args_list}'
     errors = ' '.join(str(c) for c in log.error.call_args_list)
     assert 'user2@example.com' in errors, 'gemiste abonnee wordt niet naar Janitor gemeld'
     assert '--resend' in errors, 'foutmelding noemt de herstelactie niet'

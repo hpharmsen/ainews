@@ -6,6 +6,7 @@ import email.header
 import json
 import re
 import time
+from collections.abc import Callable
 from datetime import datetime, timezone, timedelta
 from email.utils import parseaddr, parsedate_to_datetime
 from email.header import decode_header
@@ -222,8 +223,11 @@ class Mail:
             if status != 'OK' or not msg_data or not isinstance(msg_data[0], tuple):
                 return None
             return email.message_from_bytes(msg_data[0][1])
+        except CONNECTION_ERRORS:
+            raise  # Een dode verbinding is geen kapotte mail; de aanroeper verbindt opnieuw via retry_once
         except Exception as e:
-            lg.error(f"Error fetching message {email_uid}: {str(e)}")
+            # Vaste regel, uid als veld: justlog groepeert op de regel, anders wordt elk bericht een issue
+            lg.error('Error fetching message', uid=email_uid, error=str(e))
             return None
 
     def get_email_body(self, email_uid):
@@ -409,23 +413,24 @@ def get_raw_mail_text(schedule: str, cached: bool=False, verbose: bool=False):
     lg.info("Fetching emails ...")
     from_date = fetch_window_start(schedule)
     try:
-        candidates = collect_candidates(mail, from_date)
+        candidates = retry_once(mail, lambda: collect_candidates(mail, from_date), FILTER_ON_LABEL)
     except CONNECTION_ERRORS as e:
-        lg.warning(f'IMAP-verbinding verbroken tijdens ophalen: {e}. Opnieuw verbinden...')
-        if not mail.connect():
-            return
-        try:
-            candidates = collect_candidates(mail, from_date)
-        except CONNECTION_ERRORS as e:
-            lg.error(f'IMAP-verbinding verbroken, ook na opnieuw verbinden: {e}')
-            return
+        lg.error(f'IMAP-verbinding verbroken, ook na opnieuw verbinden: {e}')
+        return
 
     # Nieuwste eerst: bij een breder venster mag de cap niet het verse nieuws afkappen.
     text = ""
     for _, email_id, details in sorted(candidates, key=lambda c: c[0], reverse=True):
+        try:
+            body = retry_once(mail, lambda: mail.get_email_body(email_id), FILTER_ON_LABEL)
+        except CONNECTION_ERRORS as e:
+            lg.error(f'IMAP-verbinding verbroken bij de mailteksten, ook na opnieuw verbinden: {e}')
+            break
+        if body is None:
+            continue
+        body = body[:MAX_LEN_PER_MAIL]
         sender_name = decode_email_header(details['sender_name'])
         subject = decode_email_header(details['subject'])
-        body = str(mail.get_email_body(email_id))[:MAX_LEN_PER_MAIL]
         email_text = ' ==================================================\n' + \
         f"Source: {sender_name} {details['sender_email']}\n" + \
         f"Date: {details['date']}\n" + \
@@ -440,6 +445,18 @@ def get_raw_mail_text(schedule: str, cached: bool=False, verbose: bool=False):
             f.write(text)
 
     return text
+
+
+def retry_once[T](mail: Mail, fetch: Callable[[], T], folder: str) -> T:
+    """fetch(), en na een verbroken verbinding nog één keer op een verse verbinding met folder geselecteerd."""
+    try:
+        return fetch()
+    except CONNECTION_ERRORS as e:
+        lg.warning(f'IMAP-verbinding verbroken: {e}. Opnieuw verbinden...')
+        if not mail.connect():
+            raise
+        mail.mail.select(folder, readonly=False)
+        return fetch()
 
 
 def collect_candidates(mail: Mail, from_date: datetime) -> list[tuple]:
