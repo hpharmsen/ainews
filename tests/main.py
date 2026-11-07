@@ -1361,7 +1361,7 @@ def _patch_mailer_io(subscribers: list[str]):
         patch('src.mailer.get_subscribers', return_value=subscribers),
         patch('src.mailer.get_mailerlog', return_value=set()),
         patch('src.mailer.mailerlog'),
-        patch('src.mailer.delete_email', return_value=True),
+        patch('src.mailer.Mail', **{'return_value.delete_email.return_value': True}),
         patch('src.mailer.update_last_sent_timestamp'),
         patch('src.mailer.time.sleep'),
     ]
@@ -1647,6 +1647,77 @@ def test_smtp_reports_actual_count_not_subscriber_count():
     print('  PASS test_smtp_reports_actual_count_not_subscriber_count')
 
 
+def _sent_mail_connection(reset: bool = False) -> MagicMock:
+    """Sent Mail met één gevonden bericht, of een verbinding die bij elk uid-commando reset."""
+    conn = MagicMock()
+    conn.select.return_value = ('OK', [b'1'])
+    conn.uid.side_effect = (
+        ConnectionResetError(54, 'Connection reset by peer') if reset else lambda cmd, *a: ('OK', [b'42'])
+    )
+    return conn
+
+
+def _mail_on(first: MagicMock, *reconnects: MagicMock):
+    """Een Mail op verbinding first; elke connect() schakelt over naar de volgende uit reconnects."""
+    from src.gmail import Mail
+
+    mail = Mail()
+    mail.mail = first
+    fresh = iter(reconnects)
+    mail.connect = lambda: setattr(mail, 'mail', next(fresh)) or True
+    return mail
+
+
+def test_delete_email_reconnects_after_a_reset():
+    """Janitor 00233: [Errno 54] bij het opruimen van Sent Mail. Verwacht reconnect, geen ERROR."""
+    fresh = _sent_mail_connection()
+    mail = _mail_on(_sent_mail_connection(reset=True), fresh)
+    with patch('src.gmail.lg') as glg:
+        ok = mail.delete_email('abc@harmsen.nl')
+
+    assert ok, 'na de reconnect hoort de kopie alsnog verwijderd te worden'
+    assert not glg.error.called, f'geslaagde retry mag geen ERROR loggen: {glg.error.call_args_list}'
+    assert glg.warning.called, 'een reconnect hoort een WARNING te loggen'
+    assert any(c.args[0] == 'copy' for c in fresh.uid.call_args_list), 'verse verbinding kopieerde niet naar Trash'
+    print('  PASS test_delete_email_reconnects_after_a_reset')
+
+
+def test_delete_email_warns_when_the_connection_stays_dead():
+    """Twee keer een reset: per bericht een WARNING, de ERROR komt van send_newsletter."""
+    mail = _mail_on(_sent_mail_connection(reset=True), _sent_mail_connection(reset=True))
+    with patch('src.gmail.lg') as glg:
+        ok = mail.delete_email('abc@harmsen.nl')
+
+    assert not ok
+    assert not glg.error.called, f'per bericht hoort geen ERROR: {glg.error.call_args_list}'
+    assert glg.warning.called
+    print('  PASS test_delete_email_warns_when_the_connection_stays_dead')
+
+
+def test_newsletter_cleanup_uses_one_connection_and_one_error():
+    """Eén IMAP-verbinding voor alle kopieën, netjes gesloten; achterblijvers geven één ERROR."""
+    from contextlib import ExitStack
+
+    from src import mailer
+
+    subscribers = [f'user{i}@example.com' for i in range(3)]
+    with ExitStack() as stack:
+        for p in _patch_mailer_io(subscribers):
+            stack.enter_context(p)
+        mail_cls = stack.enter_context(patch('src.mailer.Mail'))
+        mail_cls.return_value.delete_email.side_effect = [True, False, False]
+        stack.enter_context(patch('src.mailer.connect_smtp', return_value=MagicMock()))
+        log = stack.enter_context(patch('src.mailer.lg'))
+        mailer.send_newsletter('daily', '<html>[EMAIL]</html>', 'Titel')
+
+    assert mail_cls.call_count == 1, f'verwacht één IMAP-verbinding, kreeg {mail_cls.call_count}'
+    assert mail_cls.return_value.delete_email.call_count == 3
+    assert mail_cls.return_value.close.called, 'IMAP-verbinding wordt niet gesloten'
+    assert log.error.call_count == 1, f'verwacht één ERROR, kreeg {log.error.call_args_list}'
+    assert '2 van 3' in str(log.error.call_args), f'ERROR noemt het aantal niet: {log.error.call_args}'
+    print('  PASS test_newsletter_cleanup_uses_one_connection_and_one_error')
+
+
 def main():
     os.environ.setdefault('DATABASE_URL', 'postgresql://test/test')
     tests = [
@@ -1727,6 +1798,9 @@ def main():
         test_imap_fetch_error_has_a_stable_log_template,
         test_imap_connects_with_a_timeout,
         test_smtp_reports_actual_count_not_subscriber_count,
+        test_delete_email_reconnects_after_a_reset,
+        test_delete_email_warns_when_the_connection_stays_dead,
+        test_newsletter_cleanup_uses_one_connection_and_one_error,
         test_db_retries_a_timed_out_connection,
         test_db_failure_does_not_stop_the_run_or_leak_the_password,
         test_db_failure_is_stored_by_the_next_run,

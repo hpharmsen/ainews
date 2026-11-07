@@ -1,22 +1,22 @@
+import json
 import os
 import smtplib
-import json
 import time
-from datetime import datetime, timezone
-from pathlib import Path
-from email.mime.text import MIMEText
+from datetime import UTC, datetime
 from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from email.utils import formataddr, make_msgid
+from pathlib import Path
 
 from justdays import Day
+from justlog import lg
 from sqlalchemy.exc import OperationalError
 
-from src.subscribers import get_subscribers
 from src.gmail import Mail
-from justlog import lg
+from src.subscribers import get_subscribers
 
-REPLY_TO_EMAIL = "nieuwsbrief@harmsen.nl"
-DISPLAY_FROM_EMAIL = "nieuwsbrief@harmsen.nl"
+REPLY_TO_EMAIL = 'nieuwsbrief@harmsen.nl'
+DISPLAY_FROM_EMAIL = 'nieuwsbrief@harmsen.nl'
 
 
 def connect_smtp() -> smtplib.SMTP:
@@ -27,7 +27,7 @@ def connect_smtp() -> smtplib.SMTP:
     password = os.getenv('EMAIL_HOST_PASSWORD')
 
     if not all([smtp_server, username, password]):
-        raise ValueError("Missing required SMTP configuration in environment variables")
+        raise ValueError('Missing required SMTP configuration in environment variables')
 
     server = smtplib.SMTP(smtp_server, smtp_port)
     server.starttls()
@@ -42,69 +42,60 @@ def quit_smtp(server) -> None:
     try:
         server.quit()
     except Exception as e:
-        lg.warning(f"Error closing SMTP connection: {e}")
+        lg.warning(f'Error closing SMTP connection: {e}')
 
 
 def create_message(recipient: str, subject: str, html_content: str, reply_to: str) -> MIMEMultipart:
     # Create message container
-    msg = MIMEMultipart("alternative")
-    
+    msg = MIMEMultipart('alternative')
+
     # Set basic headers
-    msg["Subject"] = subject
-    msg["From"] = formataddr(("HP's AI nieuwsbrief", "nieuwsbrief@harmsen.nl"))
-    msg["To"] = recipient
-    msg["Reply-To"] = reply_to
-    msg["Message-ID"] = make_msgid(domain="harmsen.nl")
-    msg["X-Entity-Type"] = "newsletter"
-    
+    msg['Subject'] = subject
+    msg['From'] = formataddr(("HP's AI nieuwsbrief", 'nieuwsbrief@harmsen.nl'))
+    msg['To'] = recipient
+    msg['Reply-To'] = reply_to
+    msg['Message-ID'] = make_msgid(domain='harmsen.nl')
+    msg['X-Entity-Type'] = 'newsletter'
+
     # Required headers for bulk email
-    unsubscribe_url = f"https://harmsen.nl/nieuwsbrief/afmelden/?email={recipient}"
-    msg["List-Unsubscribe"] = f"<mailto:{reply_to}?subject=unsubscribe>, <{unsubscribe_url}>"
-    msg["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
-    msg["Precedence"] = "bulk"
-    msg["X-Auto-Response-Suppress"] = "OOF, AutoReply"
-    
+    unsubscribe_url = f'https://harmsen.nl/nieuwsbrief/afmelden/?email={recipient}'
+    msg['List-Unsubscribe'] = f'<mailto:{reply_to}?subject=unsubscribe>, <{unsubscribe_url}>'
+    msg['List-Unsubscribe-Post'] = 'List-Unsubscribe=One-Click'
+    msg['Precedence'] = 'bulk'
+    msg['X-Auto-Response-Suppress'] = 'OOF, AutoReply'
+
     # Create the plain-text version
     text = """Je ontvangt dit bericht omdat je je hebt aangemeld voor de AI nieuwsbrief.
     Als je deze e-mail niet kunt lezen, bekijk deze dan in je browser: {url}
     
     Uitschrijven kan hier: {unsubscribe}""".format(
-        url=unsubscribe_url.replace("afmelden/", ""),
-        unsubscribe=unsubscribe_url
+        url=unsubscribe_url.replace('afmelden/', ''), unsubscribe=unsubscribe_url
     )
-    
+
     # Create both plain and HTML parts
-    part1 = MIMEText(text, "plain", "utf-8")
-    part2 = MIMEText(html_content, "html", "utf-8")
-    
+    part1 = MIMEText(text, 'plain', 'utf-8')
+    part2 = MIMEText(html_content, 'html', 'utf-8')
+
     # Attach parts to message
     msg.attach(part1)
     msg.attach(part2)
-    
+
     return msg
 
 
-def delete_email(message_id: str, folder: str = '[Gmail]/Sent Mail') -> bool:
-    """
-    Delete an email from a specified folder.
-
-    Args:
-        message_id: Email identifier (UID or Message-ID)
-        folder: Mailbox to delete from (default: Sent Mail)
-
-    Returns:
-        bool: True if deletion was successful, False otherwise
-    """
+def delete_sent_copies(message_ids: list[str]) -> int:
+    """Verwijder de verzonden kopieën uit Sent Mail over één IMAP-verbinding; geeft het aantal verwijderd."""
+    mail = Mail()
+    if not mail.connect():
+        return 0  # connect() heeft de ERROR al gelogd
+    deleted = 0
     try:
-        mail = Mail()
-        if not mail.connect():
-            lg.error('✗ Failed to connect to IMAP server')
-            return False
-    except Exception as e:
-        lg.error(f"✗ Error connecting to IMAP server while trying to delete an email\n{str(e)}")
-        return False
-    message_id = message_id.strip('<>') # Remove angle brackets if present
-    return mail.delete_email(message_id, folder)
+        for message_id in message_ids:
+            deleted += mail.delete_email(message_id.strip('<>'))
+            time.sleep(1)  # Small delay between deletions
+    finally:
+        mail.close()
+    return deleted
 
 
 def already_sent_today(schedule: str) -> bool:
@@ -114,37 +105,35 @@ def already_sent_today(schedule: str) -> bool:
     try:
         with open(log_file, 'r', encoding='utf-8') as f:
             return any(
-                parts[0] == schedule and parts[1] == today
-                for line in f
-                if len(parts := line.strip().split()) >= 3
+                parts[0] == schedule and parts[1] == today for line in f if len(parts := line.strip().split()) >= 3
             )
     except FileNotFoundError:
         return False
 
 
 def update_last_sent_timestamp(schedule: str) -> None:
-    """ schedule is 'daily' or 'weekly' """
+    """schedule is 'daily' or 'weekly'"""
     last_sent_file = Path(__file__).parent.parent / 'data' / 'last_sent.json'
     if last_sent_file.exists():
         with open(last_sent_file, 'r') as f:
             last_sent_data = json.load(f)
     else:
-        last_sent_data = {"last_sent": {"daily": None, "weekly": None}}
+        last_sent_data = {'last_sent': {'daily': None, 'weekly': None}}
 
     # Update the timestamp for the current schedule
-    last_sent_data['last_sent'][schedule] = datetime.now(timezone.utc).isoformat()
+    last_sent_data['last_sent'][schedule] = datetime.now(UTC).isoformat()
 
     with open(last_sent_file, 'w') as f:
         json.dump(last_sent_data, f, indent=2)
 
 
-def mailerlog(s: str=''):
+def mailerlog(s: str = ''):
     log_file = Path(__file__).parent.parent / 'data' / 'mailerlog.txt'
     with open(log_file, 'a', encoding='utf-8') as f:
-        f.write(f"{s}\n")
+        f.write(f'{s}\n')
 
 
-def get_mailerlog(day:Day) -> set:
+def get_mailerlog(day: Day) -> set:
     res = set()
     log_file = Path(__file__).parent.parent / 'data' / 'mailerlog.txt'
     with open(log_file, 'r', encoding='utf-8') as f:
@@ -182,22 +171,17 @@ def send_newsletter(schedule: str, newsletter_html: str, title: str):
                     server = connect_smtp()
 
                 # Personalize the HTML content
-                html = newsletter_html.replace("[EMAIL]", recipient)
+                html = newsletter_html.replace('[EMAIL]', recipient)
 
                 # Create and send the message
-                msg = create_message(
-                    recipient=recipient,
-                    subject=title,
-                    html_content=html,
-                    reply_to=REPLY_TO_EMAIL
-                )
+                msg = create_message(recipient=recipient, subject=title, html_content=html, reply_to=REPLY_TO_EMAIL)
 
                 # Add tracking headers
-                msg['X-Campaign-ID'] = f"ai-newsletter-{datetime.now(timezone.utc).strftime('%Y%m%d')}"
+                msg['X-Campaign-ID'] = f'ai-newsletter-{datetime.now(UTC).strftime("%Y%m%d")}'
 
                 # Send the email
                 server.sendmail(DISPLAY_FROM_EMAIL, [recipient], msg.as_string())
-                lg.info(f"Email sent to {recipient}")
+                lg.info(f'Email sent to {recipient}')
                 sent.append(recipient)
 
                 # Collect Message-ID for later deletion (if not @harmsen.nl)
@@ -205,22 +189,22 @@ def send_newsletter(schedule: str, newsletter_html: str, title: str):
                     message_ids_to_delete.append(msg['Message-ID'])
 
                 # Log successful send
-                mailerlog(f"{schedule} {Day()} {recipient}")
+                mailerlog(f'{schedule} {Day()} {recipient}')
                 break
 
             except (smtplib.SMTPException, OSError) as e:
                 quit_smtp(server)
                 server = None  # forceer een verse verbinding bij de retry
                 if attempt == 0:
-                    lg.warning(f"SMTP-fout bij {recipient}: {e}. Opnieuw verbinden...")
+                    lg.warning(f'SMTP-fout bij {recipient}: {e}. Opnieuw verbinden...')
                 else:
                     # WARNING: de ERROR met alle gemiste adressen volgt na de lus, één issue per run
-                    lg.warning(f"Verzending naar {recipient} definitief mislukt: {e}")
+                    lg.warning(f'Verzending naar {recipient} definitief mislukt: {e}')
                     failed.append(recipient)
 
         # Rate limiting
         if i % BATCH_SIZE == 0 and i < len(subscribers):
-            lg.info(f"Sent {i} emails, pausing for 60 seconds...")
+            lg.info(f'Sent {i} emails, pausing for 60 seconds...')
             time.sleep(60)
         else:
             time.sleep(1)  # Small delay between emails
@@ -229,21 +213,20 @@ def send_newsletter(schedule: str, newsletter_html: str, title: str):
 
     # Delete sent emails after a delay to allow Gmail to process them
     if message_ids_to_delete:
-        lg.info(f"Waiting 10 seconds before deleting {len(message_ids_to_delete)} sent emails...")
+        lg.info(f'Waiting 10 seconds before deleting {len(message_ids_to_delete)} sent emails...')
         time.sleep(10)
 
-        deleted_count = 0
-        for message_id in message_ids_to_delete:
-            if delete_email(message_id):
-                deleted_count += 1
-            time.sleep(1)  # Small delay between deletions
+        deleted_count = delete_sent_copies(message_ids_to_delete)
+        lg.info(f'Successfully deleted {deleted_count}/{len(message_ids_to_delete)} sent emails')
+        if left := len(message_ids_to_delete) - deleted_count:
+            lg.error(f'{left} van {len(message_ids_to_delete)} verzonden kopieën blijven staan in Sent Mail')
 
-        lg.info(f"Successfully deleted {deleted_count}/{len(message_ids_to_delete)} sent emails")
-
-    lg.info(f"Newsletter sending completed. Sent to {len(sent)} of {len(subscribers)} recipients.\n")
+    lg.info(f'Newsletter sending completed. Sent to {len(sent)} of {len(subscribers)} recipients.\n')
     if failed:
-        lg.error(f"Nieuwsbrief '{schedule}' niet bezorgd bij {len(failed)} van "
-                 f"{len(subscribers)} abonnees: {', '.join(failed)}. "
-                 f"Draai `python main.py {schedule} --resend` om alleen deze te herstellen.")
+        lg.error(
+            f"Nieuwsbrief '{schedule}' niet bezorgd bij {len(failed)} van "
+            f'{len(subscribers)} abonnees: {", ".join(failed)}. '
+            f'Draai `python main.py {schedule} --resend` om alleen deze te herstellen.'
+        )
     mailerlog()
     update_last_sent_timestamp(schedule)

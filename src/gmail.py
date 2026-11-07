@@ -1,23 +1,23 @@
 #!/Users/hp/scripts/venv/bin/python
-import os
-import imaplib
 import email
 import email.header
+import imaplib
 import json
+import os
 import re
 import time
 from collections.abc import Callable
-from datetime import datetime, timezone, timedelta
-from email.utils import parseaddr, parsedate_to_datetime
+from datetime import UTC, datetime, timedelta
 from email.header import decode_header
+from email.utils import parseaddr, parsedate_to_datetime
 from pathlib import Path
 
 import html2text
-
-from src.database import cache_file_prefix
 from justlog import lg
 
-FILTER_ON_LABEL='y_ai_news'
+from src.database import cache_file_prefix
+
+FILTER_ON_LABEL = 'y_ai_news'
 LAST_SENT_FILE = Path(__file__).parent.parent / 'data' / 'last_sent.json'
 # Ondergrens voor het ophaalvenster. Zonder deze klem verkleint een late vorige run
 # het venster van de volgende, en dan blijft er te weinig nieuws over.
@@ -70,27 +70,29 @@ class Mail:
                 # Alleen netwerkblips zijn een retry waard. [Errno 54] Connection reset by peer is
                 # een OSError, een fout wachtwoord een imaplib.IMAP4.error en die gaat niet over.
                 if not isinstance(e, CONNECTION_ERRORS) or attempt == attempts - 1:
-                    lg.error(f"Failed to connect to IMAP server: {str(e)}")
+                    lg.error(f'Failed to connect to IMAP server: {e!s}')
                     return False
-                wait = 2 * 2 ** attempt
-                lg.warning(f'IMAP connect attempt {attempt + 1}/{attempts} failed: {e}. '
-                           f'Retrying in {wait}s...')
+                wait = 2 * 2**attempt
+                lg.warning(f'IMAP connect attempt {attempt + 1}/{attempts} failed: {e}. Retrying in {wait}s...')
                 time.sleep(wait)
         return False
 
     def delete_email(self, identifier, folder='[Gmail]/Sent Mail'):
-        """
-        Move an email to trash.
-
-        Args:
-            identifier: Either a UID (numeric string) or Message-ID
-            folder: Mailbox to search in (default: Sent Mail)
-        """
+        """Move an email (UID or Message-ID) to trash; een verbroken verbinding krijgt één reconnect."""
+        mailbox = f'"{folder}"' if '/' in folder else folder
         try:
-            # Select the folder
-            status, _ = self.mail.select(f'"{folder}"' if '/' in folder else folder, readonly=False)
+            return retry_once(self, lambda: self._delete_email(identifier, folder, mailbox), mailbox)
+        except CONNECTION_ERRORS as e:
+            # WARNING: de aanroeper bepaalt of achterblijvers een incident zijn, één ERROR per run
+            lg.warning(f'✗ Failed to delete email {identifier} from {folder}: {e}')
+            return False
+
+    def _delete_email(self, identifier, folder: str, mailbox: str) -> bool:
+        """Eén verwijderpoging; verbindingsfouten gaan door naar delete_email."""
+        try:
+            status, _ = self.mail.select(mailbox, readonly=False)
             if status != 'OK':
-                lg.error(f"✗ Failed to select {folder} folder")
+                lg.error(f'✗ Failed to select {folder} folder')
                 return False
 
             # Determine if identifier is a UID or Message-ID
@@ -101,7 +103,7 @@ class Mail:
                 # It's a Message-ID, search for it
                 status, email_uids = self.mail.uid('search', None, f'(HEADER Message-ID "{identifier}")')
                 if status != 'OK' or not email_uids or not email_uids[0]:
-                    lg.error(f"✗ Email with Message-ID {identifier} not found in {folder}")
+                    lg.error(f'✗ Email with Message-ID {identifier} not found in {folder}')
                     return False
                 email_uid = email_uids[0].split()[0]
 
@@ -110,12 +112,14 @@ class Mail:
             if result[0] == 'OK':
                 self.mail.uid('store', email_uid, '+FLAGS', '\\Deleted')
                 self.mail.expunge()
-                lg.info(f"✓ Deleted email {identifier} from {folder}")
+                lg.info(f'✓ Deleted email {identifier} from {folder}')
                 return True
-            lg.error(f"✗ Failed to delete email {identifier} from {folder}.\nResult was {result}")
+            lg.error(f'✗ Failed to delete email {identifier} from {folder}.\nResult was {result}')
             return False
+        except CONNECTION_ERRORS:
+            raise
         except Exception as e:
-            lg.error(f"✗ Failed to delete email {identifier} from {folder}\nException was: {str(e)}")
+            lg.error(f'✗ Failed to delete email {identifier} from {folder}\nException was: {e!s}')
             return False
 
     def get_emails(self):
@@ -123,17 +127,17 @@ class Mail:
         try:
             status, _ = self.mail.select(FILTER_ON_LABEL, readonly=False)
             if status != 'OK':
-                lg.error(f"Failed to access label: {FILTER_ON_LABEL}")
+                lg.error(f'Failed to access label: {FILTER_ON_LABEL}')
                 return []
 
             status, email_uids = self.mail.uid('search', None, 'ALL')
             if status != 'OK' or not email_uids or not email_uids[0]:
-                lg.error(f"No emails found in label: {FILTER_ON_LABEL}")
+                lg.error(f'No emails found in label: {FILTER_ON_LABEL}')
                 return []
 
             return email_uids[0].split()
         except Exception as e:
-            lg.error(f"Error getting emails: {str(e)}")
+            lg.error(f'Error getting emails: {e!s}')
             return []
 
     def get_email_details(self, email_uid):
@@ -143,16 +147,20 @@ class Mail:
             status, flags_data = self.mail.uid('fetch', email_uid, '(FLAGS)')
             if status != 'OK' or not flags_data:
                 return None
-            
+
             # Convert all data to string for easier parsing
             flags_str = ''
             if isinstance(flags_data[0], tuple):
                 # Handle tuple format: [(b'1 (FLAGS (\\Seen \\Flagged))', b'Body text...')]
-                flags_str = flags_data[0][1].decode('utf-8', errors='ignore') if len(flags_data[0]) > 1 else flags_data[0][0].decode('utf-8', errors='ignore')
+                flags_str = (
+                    flags_data[0][1].decode('utf-8', errors='ignore')
+                    if len(flags_data[0]) > 1
+                    else flags_data[0][0].decode('utf-8', errors='ignore')
+                )
             else:
                 # Handle list format: [b'1 (FLAGS (\\Seen \\Flagged))']
                 flags_str = b' '.join(flags_data).decode('utf-8', errors='ignore')
-            
+
             # Extract flags between parentheses after FLAGS
             flags_start = flags_str.find('FLAGS (') + 7
             flags_end = flags_str.find(')', flags_start)
@@ -160,20 +168,21 @@ class Mail:
                 flags_section = flags_str[flags_start:flags_end]
                 # Extract all words starting with backslash
                 import re
+
                 flags = re.findall(r'\\(\w+)', flags_section)
             else:
                 flags = []
-                
+
             # Check for any flag that might indicate a starred/important email
             is_starred = any(flag.lower() in ['flagged', 'starred', 'star', 'important'] for flag in flags)
-            
+
             # Now fetch the email headers
             status, msg_data = self.mail.uid('fetch', email_uid, '(BODY.PEEK[HEADER.FIELDS (FROM DATE SUBJECT)])')
             if status != 'OK' or not msg_data or not isinstance(msg_data[0], tuple):
                 return None
 
             msg = email.message_from_bytes(msg_data[0][1])
-            
+
             # Extract sender information
             from_header = msg.get('From', '')
             if not from_header:
@@ -189,9 +198,9 @@ class Mail:
             # Parse date
             date_str = msg.get('Date', '')
             try:
-                date = parsedate_to_datetime(date_str) if date_str else datetime.now(timezone.utc)
+                date = parsedate_to_datetime(date_str) if date_str else datetime.now(UTC)
             except (TypeError, ValueError):
-                date = datetime.now(timezone.utc)
+                date = datetime.now(UTC)
 
             # Get subject, handle encoding
             subject = msg.get('Subject', 'No Subject')
@@ -209,7 +218,7 @@ class Mail:
                 'sender_email': sender_email,
                 'date': date,
                 'subject': subject.strip(),
-                'is_starred': is_starred
+                'is_starred': is_starred,
             }
         except CONNECTION_ERRORS:
             raise  # Een dode verbinding is geen kapotte mail; get_raw_mail_text verbindt opnieuw
@@ -271,7 +280,7 @@ class Mail:
             return plain
 
         except Exception as e:
-            lg.error(f"Error getting email body: {str(e)}")
+            lg.error(f'Error getting email body: {e!s}')
             return None
 
     def _extract_original_recipient(self, msg) -> dict | None:
@@ -286,11 +295,7 @@ class Mail:
         """
         try:
             # Check various headers that might contain the original recipient
-            headers_to_check = [
-                'Final-Recipient',
-                'Original-Recipient',
-                'X-Failed-Recipients'
-            ]
+            headers_to_check = ['Final-Recipient', 'Original-Recipient', 'X-Failed-Recipients']
 
             import re
 
@@ -308,7 +313,7 @@ class Mail:
                         return {
                             'recipient_email': email_match.group(),
                             'is_spam_rejection': False,
-                            'is_permanent': is_permanent
+                            'is_permanent': is_permanent,
                         }
 
             # If headers don't contain the info, search in the message body
@@ -330,20 +335,14 @@ class Mail:
                     r'URL.*is listed',
                     r'spam.*filter',
                     r'blacklist',
-                    r'blocked.*spam'
+                    r'blocked.*spam',
                 ]
 
-                is_spam_rejection = any(
-                    re.search(indicator, body, re.IGNORECASE)
-                    for indicator in spam_indicators
-                )
+                is_spam_rejection = any(re.search(indicator, body, re.IGNORECASE) for indicator in spam_indicators)
 
                 # Detect permanent (5xx) vs temporary (4xx) bounce
                 # Look for SMTP status codes like "550", "5.1.1", "452", "4.2.2"
-                is_permanent = bool(re.search(
-                    r'(?:^|\s)5\.\d+\.\d+|(?:^|\s)5[0-9]{2}\s',
-                    body, re.MULTILINE
-                ))
+                is_permanent = bool(re.search(r'(?:^|\s)5\.\d+\.\d+|(?:^|\s)5[0-9]{2}\s', body, re.MULTILINE))
 
                 # Look for patterns to extract recipient email from bounce messages
                 patterns = [
@@ -355,7 +354,7 @@ class Mail:
                     r'<([\w\.-]+@[\w\.-]+\.\w+)>.*?(?:failed|error|bounce)',
                     r'([\w\.-]+@[\w\.-]+\.\w+).*?(?:failed|error|bounce|undelivered)',
                     # Generic email address pattern as fallback
-                    r'([\w\.-]+@[\w\.-]+\.\w+)'
+                    r'([\w\.-]+@[\w\.-]+\.\w+)',
                 ]
 
                 for pattern in patterns:
@@ -364,7 +363,7 @@ class Mail:
                         return {
                             'recipient_email': matches[0],
                             'is_spam_rejection': is_spam_rejection,
-                            'is_permanent': is_permanent
+                            'is_permanent': is_permanent,
                         }
 
             return None
@@ -384,33 +383,33 @@ class Mail:
 
 def fetch_window_start(schedule: str) -> datetime:
     """Begin van het ophaalvenster: last_sent, maar altijd minstens MIN_LOOKBACK terug."""
-    floor = datetime.now(timezone.utc) - MIN_LOOKBACK[schedule]
+    floor = datetime.now(UTC) - MIN_LOOKBACK[schedule]
     try:
         with open(LAST_SENT_FILE, 'r') as f:
             from_date = datetime.fromisoformat(json.load(f)['last_sent'][schedule])
     except (FileNotFoundError, KeyError, TypeError, ValueError, json.JSONDecodeError):
         return floor
     if from_date.tzinfo is None:
-        from_date = from_date.replace(tzinfo=timezone.utc)
+        from_date = from_date.replace(tzinfo=UTC)
     return min(from_date, floor)
 
 
-def get_raw_mail_text(schedule: str, cached: bool=False, verbose: bool=False):
+def get_raw_mail_text(schedule: str, cached: bool = False, verbose: bool = False):
     cache_file = Path(cache_file_prefix(schedule) + '_emails.txt')
 
     if cached and cache_file.is_file():
         with open(cache_file, 'r', encoding='utf-8') as f:
-            lg.info("Using cached emails")
+            lg.info('Using cached emails')
             return f.read()
 
-    lg.info("Connecting to email ...")
+    lg.info('Connecting to email ...')
     mail = Mail()
-    
+
     if not mail.connect():
-        lg.error("Failed to connect to the email server.")
+        lg.error('Failed to connect to the email server.')
         return
 
-    lg.info("Fetching emails ...")
+    lg.info('Fetching emails ...')
     from_date = fetch_window_start(schedule)
     try:
         candidates = retry_once(mail, lambda: collect_candidates(mail, from_date), FILTER_ON_LABEL)
@@ -419,7 +418,7 @@ def get_raw_mail_text(schedule: str, cached: bool=False, verbose: bool=False):
         return
 
     # Nieuwste eerst: bij een breder venster mag de cap niet het verse nieuws afkappen.
-    text = ""
+    text = ''
     for _, email_id, details in sorted(candidates, key=lambda c: c[0], reverse=True):
         try:
             body = retry_once(mail, lambda: mail.get_email_body(email_id), FILTER_ON_LABEL)
@@ -431,11 +430,14 @@ def get_raw_mail_text(schedule: str, cached: bool=False, verbose: bool=False):
         body = body[:MAX_LEN_PER_MAIL]
         sender_name = decode_email_header(details['sender_name'])
         subject = decode_email_header(details['subject'])
-        email_text = ' ==================================================\n' + \
-        f"Source: {sender_name} {details['sender_email']}\n" + \
-        f"Date: {details['date']}\n" + \
-        f"Subject: {subject}\n" + \
-        body + "\n\n"
+        email_text = (
+            ' ==================================================\n'
+            + f'Source: {sender_name} {details["sender_email"]}\n'
+            + f'Date: {details["date"]}\n'
+            + f'Subject: {subject}\n'
+            + body
+            + '\n\n'
+        )
         if len(text + email_text) > MAX_TOTAL_LEN:
             break
         text += email_text
@@ -469,7 +471,7 @@ def collect_candidates(mail: Mail, from_date: datetime) -> list[tuple]:
         email_date = details['date']
         # Make sure email_date is timezone-aware
         if email_date.tzinfo is None:
-            email_date = email_date.replace(tzinfo=timezone.utc)
+            email_date = email_date.replace(tzinfo=UTC)
         if email_date >= from_date:
             candidates.append((email_date, email_id, details))
     return candidates
@@ -479,10 +481,10 @@ def decode_email_header(header_str: str) -> str:
     parts = []
     for part, encoding in decode_header(header_str):
         if isinstance(part, bytes):
-            parts.append(part.decode(encoding or "utf-8", errors="replace"))
+            parts.append(part.decode(encoding or 'utf-8', errors='replace'))
         else:
             parts.append(part)
-    return "".join(parts)
+    return ''.join(parts)
 
 
 def parse_emails_to_dict(raw_text: str) -> dict[str, str]:
