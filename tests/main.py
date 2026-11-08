@@ -1306,6 +1306,17 @@ def test_main_runs_the_first_pass_even_when_the_source_gate_stops_the_run():
     print('  PASS test_main_runs_the_first_pass_even_when_the_source_gate_stops_the_run')
 
 
+def test_source_gate_errors_only_without_any_source_email():
+    """Janitor 00243: 1 bronmail is een stil weekend (WARNING), 0 wijst op een storing (ERROR)."""
+    for count, level in ((1, 'warning'), (0, 'error')):
+        with patch('main.lg') as lg_mock:
+            _run_main(source_emails=count)
+        other = 'error' if level == 'warning' else 'warning'
+        assert getattr(lg_mock, level).called, f'{count} bronmails hoort {level} te geven'
+        assert not getattr(lg_mock, other).called, f'{count} bronmails mag geen {other} geven'
+    print('  PASS test_source_gate_errors_only_without_any_source_email')
+
+
 def test_main_sends_the_newsletter_when_the_handler_fails():
     """AE5: de echte afhandelaar met een kapotte IMAP-verbinding mag de run niet stoppen."""
     with patch('src.replies.lg') as lg_mock:
@@ -1785,6 +1796,7 @@ def main():
         test_main_runs_the_handler_before_and_after_sending,
         test_main_skips_the_handler_on_a_dry_run,
         test_main_runs_the_first_pass_even_when_the_source_gate_stops_the_run,
+        test_source_gate_errors_only_without_any_source_email,
         test_main_sends_the_newsletter_when_the_handler_fails,
         test_main_shifts_the_infographic_behind_the_moved_image_article,
         test_main_keeps_the_infographic_index_when_the_image_stays_first,

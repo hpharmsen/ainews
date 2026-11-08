@@ -3,20 +3,40 @@ import sys
 import time
 
 from dotenv import load_dotenv
-
-from src.database import add_to_database, cleanup_cache
-from src.gmail import get_raw_mail_text, parse_emails_to_dict
 from justdays import Day
-
-from src.ai import generate_ai_summary, edit_articles, generate_ai_image, generate_infographic, select_articles_for_visuals, check_publishable
-from src.formatter import create_html_email
 from justlog import lg, setup_logging
-from src.mailer import send_newsletter, already_sent_today
+
+from src.ai import (
+    check_publishable,
+    edit_articles,
+    generate_ai_image,
+    generate_ai_summary,
+    generate_infographic,
+    select_articles_for_visuals,
+)
+from src.database import add_to_database, cleanup_cache
+from src.formatter import create_html_email
+from src.gmail import get_raw_mail_text, parse_emails_to_dict
+from src.mailer import already_sent_today, send_newsletter
 from src.replies import handle_replies
 
 VERBOSE = True
 MIN_SOURCE_EMAILS = 2  # minder bronmails betekent geen nieuwsbrief, maar een melding
-MONTHS =["januari", "februari", "maart", "april", "mei", "juni", "juli", "augustus", "september", "oktober", "november", "december"]
+MONTHS = [
+    'januari',
+    'februari',
+    'maart',
+    'april',
+    'mei',
+    'juni',
+    'juli',
+    'augustus',
+    'september',
+    'oktober',
+    'november',
+    'december',
+]
+
 
 def parse_command_line():
     args = sys.argv[1:]
@@ -24,45 +44,41 @@ def parse_command_line():
     dry_run = False
 
     # Handle flags
-    if "--cached" in args:
+    if '--cached' in args:
         cached = True
-    if "--dry-run" in args:
+    if '--dry-run' in args:
         dry_run = True
-    args = [arg for arg in args if not arg.startswith("--")]
+    args = [arg for arg in args if not arg.startswith('--')]
 
     match args:
         case []:
             print_usage()
-        case [cmd] if cmd in ("daily", "weekly"):
+        case [cmd] if cmd in ('daily', 'weekly'):
             return cmd, cached, dry_run
         case [cmd, *_]:
-            print(f"Invalid command: {cmd}")
+            print(f'Invalid command: {cmd}')
     sys.exit(1)
 
 
 def print_usage():
-    print("Usage: python main.py <command> [--cached]")
-    print("Commands:")
-    print("   daily  - Send daily newsletter")
-    print("   weekly - Send weekly newsletter")
-    print("Options:")
-    print("   --cached  - Use cached data when available")
+    print('Usage: python main.py <command> [--cached]')
+    print('Commands:')
+    print('   daily  - Send daily newsletter')
+    print('   weekly - Send weekly newsletter')
+    print('Options:')
+    print('   --cached  - Use cached data when available')
     print("   --dry-run - Generate newsletter but don't send")
 
 
 def create_title(schedule: str) -> str:
-    dag = f"{Day().d} {MONTHS[Day().m - 1]}"
+    dag = f'{Day().d} {MONTHS[Day().m - 1]}'
     week = Day().week_number()
-    title = (
-        f"HP's AI daily - {dag}"
-        if schedule == "daily"
-        else f"HP's AI weekly - week {week}"
-    )
+    title = f"HP's AI daily - {dag}" if schedule == 'daily' else f"HP's AI weekly - week {week}"
     return title
 
 
 def main():
-    lg.info("============ Starting application ============")
+    lg.info('============ Starting application ============')
     cleanup_cache()
     schedule, cached, dry_run = parse_command_line()
 
@@ -78,8 +94,12 @@ def main():
     text = get_raw_mail_text(schedule, cached=cached, verbose=VERBOSE)
     emails_dict = parse_emails_to_dict(text or '')
     if len(emails_dict) < MIN_SOURCE_EMAILS:
-        lg.error(f"Te weinig bronmails voor '{schedule}': {len(emails_dict)} "
-                 f"(minimaal {MIN_SOURCE_EMAILS}). Nieuwsbrief niet verstuurd.")
+        # 0 bronmails wijst op een kapot filter, label of IMAP; 1 is een stil weekend
+        log = lg.error if not emails_dict else lg.warning
+        log(
+            f"Te weinig bronmails voor '{schedule}': {len(emails_dict)} "
+            f'(minimaal {MIN_SOURCE_EMAILS}). Nieuwsbrief niet verstuurd.'
+        )
         return
 
     articles = generate_ai_summary(schedule, text, cached=cached, verbose=VERBOSE)
@@ -94,8 +114,10 @@ def main():
     visual_selection = select_articles_for_visuals(articles)
 
     # Image
-    article_index, image_url = generate_ai_image(articles, schedule, cached=cached, article_index=visual_selection['image_article'])
-    articles = [articles[article_index]] + articles[:article_index] + articles[article_index + 1:]
+    article_index, image_url = generate_ai_image(
+        articles, schedule, cached=cached, article_index=visual_selection['image_article']
+    )
+    articles = [articles[article_index]] + articles[:article_index] + articles[article_index + 1 :]
 
     # Adjust infographic index after reordering (image article moved to front)
     infographic_original_index = visual_selection['infographic_article']
@@ -108,7 +130,9 @@ def main():
     visual_selection['infographic_article'] = infographic_adjusted_index
 
     # Infographic
-    infographic_article_index, infographic_url = generate_infographic(articles, emails_dict, schedule, cached=cached, visual_selection=visual_selection)
+    infographic_article_index, infographic_url = generate_infographic(
+        articles, emails_dict, schedule, cached=cached, visual_selection=visual_selection
+    )
 
     title = create_title(schedule)
     html_mail = create_html_email(schedule, articles, title, image_url, infographic_url, infographic_article_index)
@@ -128,10 +152,10 @@ if __name__ == '__main__':
     setup_logging('data/app.log')
     if os.getenv('JANITOR_ERRORS') == '1':
         from justlog.handlers import JanitorWebhookHandler
+
         lg.addHandler(JanitorWebhookHandler(project='ainews'))
     try:
         main()
     except Exception as e:
         lg.critical(f'uncaught exception, application will terminate.\n{e}', exc_info=True)
         raise
-
