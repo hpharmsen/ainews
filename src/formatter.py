@@ -2,18 +2,27 @@ import html
 from datetime import date
 from pathlib import Path
 
+from justlog import lg
+
 from src.ai import (
+    ART_MODEL_NAME,
+    CLASSIFY_MODEL_NAME,
     COPY_WRITE_MODEL_NAME,
     EDITOR_MODEL_NAME,
-    CLASSIFY_MODEL_NAME,
-    ART_MODEL_NAME,
     INFOGRAPHIC_MODEL_NAME,
 )
 from src.database import cache_file_prefix
-from justlog import lg
 
 
-def build_html_email(schedule: str, items: list[dict], newsletter_title: str, intro_text: str, image_url: str, infographic_url: str | None = None, infographic_article_index: int | None = None) -> str:
+def build_html_email(
+    schedule: str,
+    items: list[dict],
+    newsletter_title: str,
+    intro_text: str,
+    image_url: str | None,
+    infographic_url: str | None = None,
+    infographic_article_index: int | None = None,
+) -> str:
 
     schedule_naam = 'dagelijkse' if schedule == 'daily' else 'weekelijkse'
     switch_url = 'https://harmsen.nl/nieuwsbrief/'
@@ -24,12 +33,12 @@ def build_html_email(schedule: str, items: list[dict], newsletter_title: str, in
         switch_url += 'dagelijks'
         switch_text = 'dagelijkse'
 
-    today = date.today().strftime("%d %b %Y")
+    today = date.today().strftime('%d %b %Y')
     # Kaarten opbouwen
     cards_html = []
     for idx, item in enumerate(items):
-        title = item.get("title", "")
-        summary = item.get("summary", "").strip()
+        title = item.get('title', '')
+        summary = item.get('summary', '').strip()
         summary = '<p>' + summary.replace('\n\n', '</p><p>').replace('\n', '<br>') + '</p>'
 
         # Voeg infographic toe na het gespecificeerde artikel
@@ -40,18 +49,20 @@ def build_html_email(schedule: str, items: list[dict], newsletter_title: str, in
             <img src="{infographic_url}" alt="Infographic" style="width:100%; height:auto; display:block; border-radius:8px;" />
             """
         # Linklijst
-        links = item.get("links") or []
-        links_html = ""
+        links = item.get('links') or []
+        links_html = ''
         if links:
             link_tags = []
             for i, url in enumerate(links, start=1):
-                safe_url = html.escape(url).split("?utm")[0].split("&utm")[0]
+                safe_url = html.escape(url).split('?utm')[0].split('&utm')[0]
                 try:
-                    domain = safe_url.split("://")[1].split("/")[0].split(".")[-2]
+                    domain = safe_url.split('://')[1].split('/')[0].split('.')[-2]
                 except:
-                    domain = "bron"
-                link_tags.append(f'<a href="{safe_url}" target="_blank" style="color:#0b5cab;text-decoration:underline;">{domain}</a>')
-            links_html = " · ".join(link_tags)
+                    domain = 'bron'
+                link_tags.append(
+                    f'<a href="{safe_url}" target="_blank" style="color:#0b5cab;text-decoration:underline;">{domain}</a>'
+                )
+            links_html = ' · '.join(link_tags)
 
         cards_html.append(f"""
             <!-- Card -->
@@ -67,7 +78,19 @@ def build_html_email(schedule: str, items: list[dict], newsletter_title: str, in
             </tr>
             <tr><td style="height:14px;line-height:14px;font-size:0;">&nbsp;</td></tr>""")
 
-    cards = "\n".join(cards_html)
+    cards = '\n'.join(cards_html)
+
+    image_html = (
+        f"""<!-- Image -->
+                    <tr>
+                        <td style="padding:0 24px 16px 24px;">
+                            <img src="{image_url}" alt="" style="width:100%; max-width:552px; height:auto; display:block; border-radius:8px;" />
+                        </td>
+                    </tr>
+                    <tr><td style="height:10px;line-height:10px;font-size:0;">&nbsp;</td></tr>"""
+        if image_url
+        else ''
+    )
 
     html_doc = f"""<!doctype html>
 <html lang="nl">
@@ -113,13 +136,7 @@ def build_html_email(schedule: str, items: list[dict], newsletter_title: str, in
                         </td>
                     </tr>
                     <tr><td style="height:10px;line-height:10px;font-size:0;">&nbsp;</td></tr>
-                    <!-- Image -->
-                    <tr>
-                        <td style="padding:0 24px 16px 24px;">
-                            <img src="{image_url}" alt="" style="width:100%; max-width:552px; height:auto; display:block; border-radius:8px;" />
-                        </td>
-                    </tr>
-                    <tr><td style="height:10px;line-height:10px;font-size:0;">&nbsp;</td></tr>
+                    {image_html}
                     <!-- Cards -->
                     <tr>
                         <td style="padding:0 12px 16px 12px;">
@@ -159,19 +176,27 @@ def build_html_email(schedule: str, items: list[dict], newsletter_title: str, in
     return html_doc
 
 
-def create_html_email(schedule: str, items: list, title: str, image_url: str, infographic_url: str | None = None, infographic_article_index: int | None = None):
-    html_email = build_html_email(schedule,
+def create_html_email(
+    schedule: str,
+    items: list,
+    title: str,
+    image_url: str | None,
+    infographic_url: str | None = None,
+    infographic_article_index: int | None = None,
+):
+    html_email = build_html_email(
+        schedule,
         items,
         newsletter_title=title,
-        intro_text="Actueel, concreet en to-the-point",
+        intro_text='Actueel, concreet en to-the-point',
         image_url=image_url,
         infographic_url=infographic_url,
-        infographic_article_index=infographic_article_index
+        infographic_article_index=infographic_article_index,
     )
     # Schrijf naar bestand voor test/preview
-    cache_file = Path(cache_file_prefix(schedule) + ".html")
+    cache_file = Path(cache_file_prefix(schedule) + '.html')
 
-    with open(cache_file, "w", encoding="utf-8") as f:
+    with open(cache_file, 'w', encoding='utf-8') as f:
         f.write(html_email)
-    lg.info(f"HTML e-mail opgeslagen als {cache_file.stem}.html")
+    lg.info(f'HTML e-mail opgeslagen als {cache_file.stem}.html')
     return html_email

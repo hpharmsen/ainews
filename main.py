@@ -136,7 +136,7 @@ def main():
 
     title = create_title(schedule)
     html_mail = create_html_email(schedule, articles, title, image_url, infographic_url, infographic_article_index)
-    add_to_database(schedule, title, html_mail, image_url)
+    add_to_database(schedule, title, html_mail, image_url or '')
     if dry_run:
         lg.info('Dry run: newsletter generated but not sent')
         return

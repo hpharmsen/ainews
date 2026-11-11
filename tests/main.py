@@ -1353,6 +1353,69 @@ def test_main_handles_a_cached_image_that_ignores_the_selection():
     print('  PASS test_main_handles_a_cached_image_that_ignores_the_selection')
 
 
+MODERATION_ERROR = Exception("Error code: 400 - {'error': {'code': 'moderation_blocked'}}")
+
+
+def _generate_image(blocked: set[int], article_index: int = 0):
+    """Draai generate_ai_image met een model dat de prompts van de artikelen in `blocked` weigert."""
+    from src.ai import generate_ai_image
+
+    model = MagicMock()
+
+    def fake_generate(prompt, size):
+        if prompt in {f'Artikel {i}' for i in blocked}:  # load_prompt is gepatcht tot de titel
+            raise MODERATION_ERROR
+        return MagicMock()
+
+    model.generate_image.side_effect = fake_generate
+    articles = [{'title': f'Artikel {i}', 'summary': f'Samenvatting {i}'} for i in range(3)]
+    with (
+        tempfile.TemporaryDirectory() as tmp,
+        _patch_cache_prefix(Path(tmp)),
+        patch('src.ai.Model', return_value=model),
+        patch('src.ai.load_prompt', lambda name, title, summary, color: title),
+        patch('src.ai.S3') as s3,
+        patch('src.ai.time') as time_mock,
+        patch('src.ai.lg') as log,
+    ):
+        s3.return_value.add.return_value = 'https://example.com/i.png'
+        result = generate_ai_image(articles, 'daily', cached=False, article_index=article_index)
+    return result, model, log, time_mock
+
+
+def test_image_moves_to_the_next_article_on_moderation_blocked():
+    """Janitor 00262: een geblokkeerde prompt niet herhalen, maar het volgende artikel proberen."""
+    result, model, log, time_mock = _generate_image(blocked={1}, article_index=1)
+
+    assert result == (0, 'https://example.com/i.png'), f'kreeg {result}'
+    assert model.generate_image.call_count == 2, f'{model.generate_image.call_count} pogingen'
+    assert not time_mock.sleep.called, 'na een moderation-blokkade hoort niet gewacht te worden'
+    assert log.warning.called and not log.error.called
+    print('  PASS test_image_moves_to_the_next_article_on_moderation_blocked')
+
+
+def test_image_gives_up_with_one_error_when_every_article_is_blocked():
+    """Janitor 00262: geen afbeelding mogelijk geeft (0, None) en één ERROR, geen crash."""
+    result, model, log, _ = _generate_image(blocked={0, 1, 2})
+
+    assert result == (0, None), f'kreeg {result}'
+    assert model.generate_image.call_count == 3, f'{model.generate_image.call_count} pogingen'
+    assert log.error.call_count == 1, f'{log.error.call_count} errors'
+    print('  PASS test_image_gives_up_with_one_error_when_every_article_is_blocked')
+
+
+def test_html_email_without_header_image():
+    """Zonder image_url geen lege <img> bovenaan de nieuwsbrief."""
+    from src.formatter import build_html_email
+
+    with_image = build_html_email('daily', _sample_articles(), 'T', 'intro', 'https://example.com/i.png')
+    without = build_html_email('daily', _sample_articles(), 'T', 'intro', None)
+
+    assert 'https://example.com/i.png' in with_image
+    assert '<!-- Image -->' not in without and 'None' not in without
+    print('  PASS test_html_email_without_header_image')
+
+
 def test_the_infographic_fallbacks_in_main_are_gone():
     """R5: select_articles_for_visuals levert altijd een geldige, andere index. Afvangen is dode code."""
     main_py = (Path(__file__).resolve().parent.parent / 'main.py').read_text()
@@ -1801,6 +1864,9 @@ def main():
         test_main_shifts_the_infographic_behind_the_moved_image_article,
         test_main_keeps_the_infographic_index_when_the_image_stays_first,
         test_main_handles_a_cached_image_that_ignores_the_selection,
+        test_image_moves_to_the_next_article_on_moderation_blocked,
+        test_image_gives_up_with_one_error_when_every_article_is_blocked,
+        test_html_email_without_header_image,
         test_the_infographic_fallbacks_in_main_are_gone,
         test_smtp_reconnects_after_broken_connection,
         test_imap_reconnects_after_a_dead_connection,

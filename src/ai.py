@@ -1,21 +1,25 @@
 import json
+import os
 import time
 from pathlib import Path
-import os
-from typing import Tuple
+from typing import Annotated
 from urllib.parse import parse_qs, urlparse, urlunparse
 
 import httpx
 from justai import Model
-from justai.models.basemodel import (ConnectionException, GeneralException, ModelOverloadException,
-                                     RatelimitException, RefusalException)
+from justai.models.basemodel import (
+    ConnectionException,
+    GeneralException,
+    ModelOverloadException,
+    RatelimitException,
+    RefusalException,
+)
 from justdays import Day
-from pydantic import BaseModel, Field
-from typing import Annotated
-
-from src.database import get_last_newsletter_summaries, cache_file_prefix
-from src.s3 import S3
 from justlog import lg
+from pydantic import BaseModel, Field
+
+from src.database import cache_file_prefix, get_last_newsletter_summaries
+from src.s3 import S3
 
 COPY_WRITE_MODEL = 'gpt-6-luna'
 COPY_WRITE_MODEL_NAME = 'GPT-6 Luna'
@@ -38,40 +42,29 @@ MIN_ARTICLES = 3
 # HTTP-statussen die vanzelf overgaan. 529 is Anthropic's Overloaded.
 TRANSIENT_STATUS_CODES = {429, 500, 502, 503, 504, 529}
 
+
 def load_prompt(name: str, **kwargs) -> str:
     """Load a prompt template from the prompts folder and substitute variables."""
     text = (PROMPTS_DIR / f'{name}.md').read_text()
     return text.format(**kwargs) if kwargs else text
 
 
-
 class Article(BaseModel):
-    title: str = Field(
-        description="Korte, informatieve titel (geen clickbait), plain text zonder markdown of HTML"
-    )
-    summary: str = Field(
-        description="4–8 zinnen met regelafbrekingen toegestaan, plain text zonder markdown of HTML"
-    )
+    title: str = Field(description='Korte, informatieve titel (geen clickbait), plain text zonder markdown of HTML')
+    summary: str = Field(description='4–8 zinnen met regelafbrekingen toegestaan, plain text zonder markdown of HTML')
     # str en geen HttpUrl: OpenAI weigert het 'uri'-format in een schema. De links gaan hierna
     # toch langs check_and_resolve_url.
-    links: list[str] = Field(
-        description="Canonieke bronlinks gebruikt in het artikel"
-    )
-    sources: list[str] = Field(
-        description="Lijst van bronnen die gebruikt werden om de samenvatting te maken"
-    )
+    links: list[str] = Field(description='Canonieke bronlinks gebruikt in het artikel')
+    sources: list[str] = Field(description='Lijst van bronnen die gebruikt werden om de samenvatting te maken')
 
 
 class Summary(BaseModel):
-    articles: Annotated[
-        list[Article],
-        Field(min_length=1, max_length=8, description="Geselecteerde nieuwsartikelen")
-    ]
+    articles: Annotated[list[Article], Field(min_length=1, max_length=8, description='Geselecteerde nieuwsartikelen')]
 
 
 class EditedArticle(BaseModel):
-    title: str = Field(description="Verbeterde of onveranderde titel")
-    summary: str = Field(description="Verbeterde of onveranderde samenvatting")
+    title: str = Field(description='Verbeterde of onveranderde titel')
+    summary: str = Field(description='Verbeterde of onveranderde samenvatting')
 
 
 def check_publishable(articles: list[dict]) -> str | None:
@@ -148,22 +141,21 @@ def check_and_resolve_url(url: str) -> str | None:
 
 def generate_ai_summary(schedule: str, text: str, verbose=False, cached=True):
     # Load from cache if exists and caching is enabled
-    cache_file =  Path(cache_file_prefix(schedule) + "_summary.jsonl")
+    cache_file = Path(cache_file_prefix(schedule) + '_summary.jsonl')
     if cached and cache_file.is_file():
-        with open(cache_file, "r", encoding="utf-8") as f:
+        with open(cache_file, 'r', encoding='utf-8') as f:
             summary = [json.loads(line) for line in f]
             if verbose:
-                lg.info("Loaded summary from cache")
+                lg.info('Loaded summary from cache')
             return summary
 
     # Generate new summary
     model = Model(COPY_WRITE_MODEL, max_tokens=5000)
     max_articles = 6 if schedule == 'daily' else 8
     latest_newsletters = get_last_newsletter_summaries(schedule, limit=5)
-    prompt = load_prompt('copywrite',
-                         max_articles=max_articles,
-                         latest_newsletters=latest_newsletters,
-                         news_emails=text)
+    prompt = load_prompt(
+        'copywrite', max_articles=max_articles, latest_newsletters=latest_newsletters, news_emails=text
+    )
     lg.info('Generating summary...')
 
     for attempt in range(5):
@@ -171,7 +163,7 @@ def generate_ai_summary(schedule: str, text: str, verbose=False, cached=True):
             result = model.prompt(prompt, response_format=Summary, cached=False)
             break
         except Exception as e:
-            wait_time = 5 * (2 ** attempt)
+            wait_time = 5 * (2**attempt)
             lg.warning(f'Summary generation attempt {attempt + 1}/5 failed: {e}. Retrying in {wait_time}s...')
             time.sleep(wait_time)
     else:
@@ -181,8 +173,7 @@ def generate_ai_summary(schedule: str, text: str, verbose=False, cached=True):
 
     # Filter out "skip" items the LLM may produce despite prompt instructions
     skip_phrases = ('wordt overgeslagen', 'wordt daarom overgeslagen')
-    filtered = [a for a in summary.articles
-                if not any(p in a.summary.lower() for p in skip_phrases)]
+    filtered = [a for a in summary.articles if not any(p in a.summary.lower() for p in skip_phrases)]
     dropped = len(summary.articles) - len(filtered)
     if dropped:
         lg.info(f'Dropped {dropped} skip-marker item(s) from summary')
@@ -207,10 +198,10 @@ def generate_ai_summary(schedule: str, text: str, verbose=False, cached=True):
 
     # Save to cache and convert to dicts for downstream use
     result = []
-    with open(cache_file, "w", encoding="utf-8") as f:
+    with open(cache_file, 'w', encoding='utf-8') as f:
         for article in summary.articles:
             article_dict = article.model_dump(mode='json')
-            f.write(json.dumps(article_dict, ensure_ascii=False) + "\n")
+            f.write(json.dumps(article_dict, ensure_ascii=False) + '\n')
             result.append(article_dict)
 
     return result
@@ -231,79 +222,92 @@ def edit_articles(schedule: str, articles: list[dict], cached: bool = True, verb
     model = Model(EDITOR_MODEL, max_tokens=2000)
     edited: list[dict] = []
     for idx, article in enumerate(articles):
-        prompt = load_prompt('editor',
-                             title=article.get('title', ''),
-                             summary=article.get('summary', ''))
+        prompt = load_prompt('editor', title=article.get('title', ''), summary=article.get('summary', ''))
         try:
             try:
                 result = retry_prompt(model, prompt, return_json=False, response_format=EditedArticle)
             except RefusalException as e:
                 # Vaak een vals-positieve veiligheidsweigering; een ander model redigeert het wel.
                 lg.warning(f'Editor refused article {idx}, retrying with {COPY_WRITE_MODEL_NAME}: {e}')
-                result = retry_prompt(Model(COPY_WRITE_MODEL, max_tokens=2000), prompt,
-                                      return_json=False, response_format=EditedArticle)
+                result = retry_prompt(
+                    Model(COPY_WRITE_MODEL, max_tokens=2000), prompt, return_json=False, response_format=EditedArticle
+                )
         except Exception as e:
             # Ook de fallback faalt, of een blijvende fout: artikel ongeredigeerd, de nieuwsbrief gaat door.
             lg.error(f'Editor failed for article {idx}, left unedited: {type(e).__name__}: {e}')
             edited.append(article)
             continue
         ea = EditedArticle(**result) if isinstance(result, dict) else result
-        edited.append({
-            **article,
-            'title': ea.title,
-            'summary': ea.summary.strip(),
-        })
+        edited.append(
+            {
+                **article,
+                'title': ea.title,
+                'summary': ea.summary.strip(),
+            }
+        )
 
     with open(cache_file, 'w', encoding='utf-8') as f:
-        for art in edited:
-            f.write(json.dumps(art, ensure_ascii=False) + '\n')
+        f.writelines(json.dumps(art, ensure_ascii=False) + '\n' for art in edited)
     return edited
 
 
-def generate_ai_image(articles: list[dict], schedule: str, cached: bool, article_index: int, max_retries: int = 5) -> Tuple[int, str]:
-    """Genereer header image met gpt-image-2 in Art Deco stijl."""
+def _generate_image_for(article: dict, schedule: str, out_path: Path, max_retries: int) -> bool:
+    """Genereer de header image voor één artikel. False als de veiligheidsfilter hem blokkeert."""
+    if schedule == 'daily':
+        color = COLORS[Day().day_of_week()]
+    else:
+        color = COLORS[Day().week_number() % len(COLORS)]
+
+    prompt = load_prompt('art_prompt', title=article.get('title', ''), summary=article.get('summary', ''), color=color)
+
+    lg.info('Generating image...')
+    model = Model(ART_MODEL)
+    for attempt in range(max_retries):
+        try:
+            if attempt > 0:
+                lg.warning(f'Generating image (attempt {attempt + 1}/{max_retries})...')
+
+            img = model.generate_image(prompt, size=(550, 275))
+            img.save(out_path, format='PNG')
+            lg.info('Image generated successfully')
+            return True
+
+        except (httpx.ReadTimeout, TimeoutError) as e:
+            if attempt == max_retries - 1:
+                lg.error(f'Failed to generate image after {max_retries} attempts')
+                raise Exception(f'Image generation timed out after {max_retries} attempts') from e
+            lg.warning('Timeout occurred, retrying...')
+            time.sleep(min(30 * 2**attempt, 300))
+
+        except Exception as e:
+            # Dezelfde prompt opnieuw insturen wordt weer geblokkeerd; een ander artikel wel proberen.
+            if 'moderation_blocked' in str(e):
+                lg.warning(f'Veiligheidsfilter blokkeerde de afbeelding bij "{article.get("title", "")}"')
+                return False
+            if attempt == max_retries - 1:
+                lg.error(f'Failed to generate image: {e!s}')
+                raise
+            lg.warning(f'Error generating image: {e!s}. Retrying...')
+            time.sleep(min(30 * 2**attempt, 300))
+
+
+def generate_ai_image(
+    articles: list[dict], schedule: str, cached: bool, article_index: int, max_retries: int = 5
+) -> tuple[int, str | None]:
+    """Genereer header image met gpt-image-2 in Art Deco stijl. Lukt dat bij geen artikel: (0, None)."""
     out_path = Path(cache_file_prefix(schedule) + '.png')
 
     if cached and os.path.isfile(out_path):
         lg.info('Loading image from cache')
         article_index = 0
     else:
-        article = articles[article_index]
-        if schedule == 'daily':
-            color = COLORS[Day().day_of_week()]
-        else:
-            color = COLORS[Day().week_number() % len(COLORS)]
-
-        prompt = load_prompt('art_prompt',
-                             title=article.get('title', ''),
-                             summary=article.get('summary', ''),
-                             color=color)
-
-        lg.info('Generating image...')
-        model = Model(ART_MODEL)
-        for attempt in range(max_retries):
-            try:
-                if attempt > 0:
-                    lg.warning(f'Generating image (attempt {attempt + 1}/{max_retries})...')
-
-                img = model.generate_image(prompt, size=(550, 275))
-                img.save(out_path, format='PNG')
-                lg.info('Image generated successfully')
+        order = [article_index] + [i for i in range(len(articles)) if i != article_index]
+        for article_index in order:
+            if _generate_image_for(articles[article_index], schedule, out_path, max_retries):
                 break
-
-            except (httpx.ReadTimeout, TimeoutError) as e:
-                if attempt == max_retries - 1:
-                    lg.error(f'Failed to generate image after {max_retries} attempts')
-                    raise Exception(f'Image generation timed out after {max_retries} attempts') from e
-                lg.warning(f'Timeout occurred, retrying...')
-                time.sleep(min(30 * 2 ** attempt, 300))
-
-            except Exception as e:
-                if attempt == max_retries - 1:
-                    lg.error(f'Failed to generate image: {str(e)}')
-                    raise
-                lg.warning(f'Error generating image: {str(e)}. Retrying...')
-                time.sleep(min(30 * 2 ** attempt, 300))
+        else:
+            lg.error(f'Geen header-afbeelding: veiligheidsfilter blokkeerde alle {len(articles)} artikelen')
+            return 0, None
 
     # Upload to S3
     s3 = S3('harmsen.nl')
@@ -313,9 +317,11 @@ def generate_ai_image(articles: list[dict], schedule: str, cached: bool, article
             url = s3.add(str(out_path), 'nieuwsbrief/' + out_path.name)
             return article_index, url
         except Exception as e:
-            wait_time = 5 * (2 ** attempt)
-            lg.error(f'S3 upload attempt {attempt + 1}/{s3_attempts} failed: '
-                     f'{type(e).__name__}: {e}. Retrying in {wait_time}s...')
+            wait_time = 5 * (2**attempt)
+            lg.error(
+                f'S3 upload attempt {attempt + 1}/{s3_attempts} failed: '
+                f'{type(e).__name__}: {e}. Retrying in {wait_time}s...'
+            )
             if attempt < s3_attempts - 1:
                 time.sleep(wait_time)
     raise TimeoutError(f'Failed to upload image to S3 after {s3_attempts} attempts')
@@ -323,20 +329,26 @@ def generate_ai_image(articles: list[dict], schedule: str, cached: bool, article
 
 def extract_relevant_source_text(article: dict, source_text: str) -> str:
     """Extract alleen de tekst uit de bron die relevant is voor het artikel."""
-    prompt = load_prompt('extract_source',
-                         title=article.get('title', ''),
-                         summary=article.get('summary', ''),
-                         source_text=source_text)
+    prompt = load_prompt(
+        'extract_source', title=article.get('title', ''), summary=article.get('summary', ''), source_text=source_text
+    )
 
     model = Model('claude-haiku-4-5')
     return retry_prompt(model, prompt, return_json=False)
 
 
-def generate_infographic(articles: list[dict], emails_dict: dict[str, str], schedule: str, cached: bool, visual_selection: dict, max_retries: int = 5) -> Tuple[int | None, str | None]:
-    out_path = Path(cache_file_prefix(schedule) + "_infographic.png")
+def generate_infographic(
+    articles: list[dict],
+    emails_dict: dict[str, str],
+    schedule: str,
+    cached: bool,
+    visual_selection: dict,
+    max_retries: int = 5,
+) -> tuple[int | None, str | None]:
+    out_path = Path(cache_file_prefix(schedule) + '_infographic.png')
 
     if cached and os.path.isfile(out_path):
-        lg.info("Loading image from cache")
+        lg.info('Loading image from cache')
         article_index = 0
     else:
         article_index = visual_selection['infographic_article']
@@ -353,61 +365,62 @@ def generate_infographic(articles: list[dict], emails_dict: dict[str, str], sche
                 break
     source_content = '\n\n---\n\n'.join(source_texts) if source_texts else ''
 
-    prompt = load_prompt('infographic',
-                         title=article.get('title', ''),
-                         summary=article.get('summary', ''),
-                         source_content=source_content)
+    prompt = load_prompt(
+        'infographic', title=article.get('title', ''), summary=article.get('summary', ''), source_content=source_content
+    )
 
     if not (cached and os.path.isfile(out_path)):
-        lg.info("Generating infographic...")
+        lg.info('Generating infographic...')
         model = Model(INFOGRAPHIC_MODEL)
         generated = False
         # Retry logic with exponential backoff
         for attempt in range(max_retries):
             try:
                 if attempt > 0:
-                    lg.warning(f"Generating infographic (attempt {attempt + 1}/{max_retries})...")
+                    lg.warning(f'Generating infographic (attempt {attempt + 1}/{max_retries})...')
 
                 img = model.generate_image(prompt)
                 if img is None:
                     raise ValueError('Image generation returned None')
-                img.save(out_path, format="PNG")
-                lg.info("Image generated successfully")
+                img.save(out_path, format='PNG')
+                lg.info('Image generated successfully')
                 generated = True
                 break
 
             except (httpx.ReadTimeout, TimeoutError) as e:
                 if attempt == max_retries - 1:  # Last attempt
-                    lg.error(f"Failed to generate infographic after {max_retries} attempts: {e}")
+                    lg.error(f'Failed to generate infographic after {max_retries} attempts: {e}')
                     break
 
-                lg.warning(f"Timeout occurred, retrying...")
-                time.sleep(min(30 * 2 ** attempt, 300))
+                lg.warning('Timeout occurred, retrying...')
+                time.sleep(min(30 * 2**attempt, 300))
 
             except Exception as e:
                 if attempt == max_retries - 1:  # Last attempt
-                    lg.error(f"Failed to generate infographic: {str(e)}")
+                    lg.error(f'Failed to generate infographic: {e!s}')
                     break
-                lg.warning(f"Error generating infographic: {str(e)}. Retrying...")
-                time.sleep(min(30 * 2 ** attempt, 300))
+                lg.warning(f'Error generating infographic: {e!s}. Retrying...')
+                time.sleep(min(30 * 2**attempt, 300))
 
         if not generated:
             return None, None
 
     # Upload to S3
-    s3 = S3("harmsen.nl")
+    s3 = S3('harmsen.nl')
     s3_attempts = 5
     for attempt in range(s3_attempts):
         try:
-            url = s3.add(str(out_path), "nieuwsbrief/" + out_path.name)
+            url = s3.add(str(out_path), 'nieuwsbrief/' + out_path.name)
             return article_index, url
         except Exception as e:
-            wait_time = 5 * (2 ** attempt)
-            lg.error(f'S3 infographic upload attempt {attempt + 1}/{s3_attempts} failed: '
-                     f'{type(e).__name__}: {e}. Retrying in {wait_time}s...')
+            wait_time = 5 * (2**attempt)
+            lg.error(
+                f'S3 infographic upload attempt {attempt + 1}/{s3_attempts} failed: '
+                f'{type(e).__name__}: {e}. Retrying in {wait_time}s...'
+            )
             if attempt < s3_attempts - 1:
                 time.sleep(wait_time)
-    raise TimeoutError(f"Failed to upload infographic to S3 after {s3_attempts} attempts")
+    raise TimeoutError(f'Failed to upload infographic to S3 after {s3_attempts} attempts')
 
 
 ILLUSTRATION_INSTRUCTIONS = (
@@ -425,8 +438,10 @@ def select_articles_for_visuals(articles: list[dict]) -> dict:
     """Kies via Jev twee verschillende artikelen: één voor de illustratie en één voor de infographic."""
     assert len(articles) >= 2, 'een illustratie en een infographic hebben twee artikelen nodig'
     options = {str(i): f'{a["title"]}: {a["summary"]}' for i, a in enumerate(articles)}
-    questions = {'illustratie': {'type': 'choice', 'criteria': options, 'instructions': ILLUSTRATION_INSTRUCTIONS},
-                 'infographic': {'type': 'choice', 'criteria': options, 'instructions': INFOGRAPHIC_INSTRUCTIONS}}
+    questions = {
+        'illustratie': {'type': 'choice', 'criteria': options, 'instructions': ILLUSTRATION_INSTRUCTIONS},
+        'infographic': {'type': 'choice', 'criteria': options, 'instructions': INFOGRAPHIC_INSTRUCTIONS},
+    }
     for attempt in range(2):
         # Bewust breed: ook een onverwachte antwoordvorm (KeyError) mag de nieuwsbrief niet
         # tegenhouden. Niet stil, want de laatste poging logt lg.error.
@@ -453,13 +468,13 @@ def _best_article(answer: dict, count: int, exclude: int | None = None) -> int:
 # model te zien krijgt, dus ze staan hier en niet in een comment.
 REPLY_CATEGORIES = {
     'afmelding': 'De afzender wil de nieuwsbrief niet meer ontvangen. Ook een machinale '
-                 'one-click afmelding van een mailprogramma valt hieronder.',
+    'one-click afmelding van een mailprogramma valt hieronder.',
     'delay': 'Een automatische melding van een mailserver dat bezorging vertraagd is en nog '
-             'opnieuw wordt geprobeerd. Nog geen definitieve mislukking.',
+    'opnieuw wordt geprobeerd. Nog geen definitieve mislukking.',
     'bounce': 'Een automatische melding van een mailserver dat bezorging definitief is mislukt.',
     'hp': 'Iets waar een mens naar moet kijken: een inhoudelijke lezersreactie, een vraag, een '
-          'klacht dat de nieuwsbrief niet aankomt, of iets dat in geen van de andere '
-          'categorieen past.',
+    'klacht dat de nieuwsbrief niet aankomt, of iets dat in geen van de andere '
+    'categorieen past.',
 }
 
 CLASSIFY_INSTRUCTIONS = (
@@ -478,12 +493,9 @@ MAX_REPLY_BODY = 2000
 def classify_reply(sender: str, subject: str, body: str | None) -> str:
     """Kies een van REPLY_CATEGORIES voor een binnengekomen mail. Bij twijfel hp."""
     state = f'Van: {sender}\nOnderwerp: {subject}\n\n{(body or "")[:MAX_REPLY_BODY]}'
-    answer = Model(CLASSIFY_MODEL).classify(
-        state, REPLY_CATEGORIES, instructions=CLASSIFY_INSTRUCTIONS, cached=False
-    )
+    answer = Model(CLASSIFY_MODEL).classify(state, REPLY_CATEGORIES, instructions=CLASSIFY_INSTRUCTIONS, cached=False)
     if answer['confidence'] < MIN_CONFIDENCE:
-        lg.info(f'{sender}: {answer["choice"]} met confidence '
-                f'{answer["confidence"]:.2f}, onder de drempel dus hp')
+        lg.info(f'{sender}: {answer["choice"]} met confidence {answer["confidence"]:.2f}, onder de drempel dus hp')
         return 'hp'
     return answer['choice']
 
@@ -506,7 +518,6 @@ def retry_prompt(model, prompt, return_json: bool = True, response_format=None):
                 # Allebei zou Janitor twee issues geven voor één gebeurtenis.
                 lg.warning(f'{type(e).__name__} na {attempts} pogingen, opgegeven: {e}')
                 raise
-            wait = min(5 * 2 ** attempt, 60)
-            lg.warning(f'{type(e).__name__}: {e}. Retrying in {wait}s '
-                       f'(attempt {attempt + 1}/{attempts})...')
+            wait = min(5 * 2**attempt, 60)
+            lg.warning(f'{type(e).__name__}: {e}. Retrying in {wait}s (attempt {attempt + 1}/{attempts})...')
             time.sleep(wait)
