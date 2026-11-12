@@ -23,8 +23,8 @@ from src.s3 import S3
 
 COPY_WRITE_MODEL = 'gpt-6-luna'
 COPY_WRITE_MODEL_NAME = 'GPT-6 Luna'
-ART_MODEL = 'gpt-image-2-2026-04-21'
-ART_MODEL_NAME = 'GPT Image 2'
+ART_MODEL = 'gpt-image-2.6-flare'
+ART_MODEL_NAME = 'GPT Image 2.6 Flare'
 INFOGRAPHIC_MODEL = 'gemini-3.1-flash-image-preview'
 INFOGRAPHIC_MODEL_NAME = 'Nano Banana 2'
 EDITOR_MODEL = 'claude-opus-5-5'
@@ -294,7 +294,7 @@ def _generate_image_for(article: dict, schedule: str, out_path: Path, max_retrie
 def generate_ai_image(
     articles: list[dict], schedule: str, cached: bool, article_index: int, max_retries: int = 5
 ) -> tuple[int, str | None]:
-    """Genereer header image met gpt-image-2 in Art Deco stijl. Lukt dat bij geen artikel: (0, None)."""
+    """Genereer header image met gpt-image-2.6-flare in Art Deco stijl. Lukt dat bij geen artikel: (0, None)."""
     out_path = Path(cache_file_prefix(schedule) + '.png')
 
     if cached and os.path.isfile(out_path):
