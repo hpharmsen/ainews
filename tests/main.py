@@ -581,7 +581,7 @@ def test_classify_lets_a_model_failure_through():
 
     model = MagicMock()
     model.classify.side_effect = ConnectionException('geen verbinding')
-    with patch('src.ai.Model', return_value=model):
+    with patch('src.ai.Model', return_value=model), patch('src.ai.time.sleep'):
         try:
             classify_reply('iemand@example.com', 'iets', 'iets')
         except ConnectionException:
@@ -589,6 +589,68 @@ def test_classify_lets_a_model_failure_through():
         else:
             raise AssertionError('ConnectionException had door moeten komen')
     print('  PASS test_classify_lets_a_model_failure_through')
+
+
+def test_classify_retries_a_read_timeout():
+    """Janitor 00246: één LLM-timeout bij classificeren is een WARNING en een nieuwe poging, geen ERROR."""
+    from justai.models.basemodel import ConnectionException
+
+    from src.ai import classify_reply
+
+    model = _classify_model('afmelding', 1.0)
+    answer = model.classify.return_value
+    model.classify.side_effect = [ConnectionException('The read operation timed out'), answer]
+    with patch('src.ai.Model', return_value=model), patch('src.ai.time.sleep'), patch('src.ai.lg') as log:
+        category = classify_reply('iemand@example.com', 'stoppen', 'Graag stoppen.')
+
+    assert category == 'afmelding', f'verwacht afmelding na de retry, kreeg {category}'
+    assert model.classify.call_count == 2, f'verwacht 2 pogingen, kreeg {model.classify.call_count}'
+    assert log.warning.called and not log.error.called
+    print('  PASS test_classify_retries_a_read_timeout')
+
+
+def _infographic(*side_effects):
+    """Draai generate_infographic met een gemockt model en S3; geeft (resultaat, model, lg-mock)."""
+    from src.ai import generate_infographic
+
+    model = MagicMock()
+    model.generate_image.side_effect = side_effects
+    with tempfile.TemporaryDirectory() as tmp:
+        with (
+            _patch_cache_prefix(Path(tmp)),
+            patch('src.ai.Model', return_value=model),
+            patch('src.ai.S3') as s3,
+            patch('src.ai.time.sleep'),
+            patch('src.ai.lg') as log,
+        ):
+            s3.return_value.add.return_value = 'https://s3/info.png'
+            result = generate_infographic(_sample_articles(), {}, 'daily', False, {'infographic_article': 1})
+    return result, model, log
+
+
+def test_infographic_gives_up_at_once_on_a_permanent_error():
+    """Janitor 00234: een 402 (tegoed op) gaat niet vanzelf over; één poging en één ERROR."""
+    from google.genai.errors import ClientError
+
+    depleted = ClientError(402, {'error': {'code': 402, 'message': 'credits depleted', 'status': 'RESOURCE_EXHAUSTED'}})
+    result, model, log = _infographic(*[depleted] * 5)
+
+    assert result == (None, None)
+    assert model.generate_image.call_count == 1, f'402 werd {model.generate_image.call_count} keer geprobeerd'
+    assert log.error.call_count == 1, f'verwacht één ERROR, kreeg {log.error.call_args_list}'
+    print('  PASS test_infographic_gives_up_at_once_on_a_permanent_error')
+
+
+def test_infographic_still_retries_a_timeout():
+    """Een tijdelijke timeout blijft een nieuwe poging waard."""
+    import httpx
+
+    result, model, log = _infographic(httpx.ReadTimeout('timed out'), MagicMock())
+
+    assert result == (1, 'https://s3/info.png'), f'kreeg {result}'
+    assert model.generate_image.call_count == 2
+    assert not log.error.called, f'geslaagde retry gaf ERROR: {log.error.call_args_list}'
+    print('  PASS test_infographic_still_retries_a_timeout')
 
 
 # ---------------------------------------------------------------------------
@@ -1768,6 +1830,18 @@ def test_delete_email_warns_when_the_connection_stays_dead():
     print('  PASS test_delete_email_warns_when_the_connection_stays_dead')
 
 
+def test_delete_email_searches_gmail_index():
+    """Janitor 00210: HEADER Message-ID scant de hele map; X-GM-RAW gebruikt Gmail's eigen index."""
+    conn = _sent_mail_connection()
+    mail = _mail_on(conn)
+    with patch('src.gmail.lg'):
+        assert mail.delete_email('abc@harmsen.nl')
+
+    search = next(c.args for c in conn.uid.call_args_list if c.args[0] == 'search')
+    assert 'X-GM-RAW' in search and '"rfc822msgid:abc@harmsen.nl"' in search, f'zoekopdracht was {search}'
+    print('  PASS test_delete_email_searches_gmail_index')
+
+
 def test_newsletter_cleanup_uses_one_connection_and_one_error():
     """Eén IMAP-verbinding voor alle kopieën, netjes gesloten; achterblijvers geven één ERROR."""
     from contextlib import ExitStack
@@ -1825,6 +1899,9 @@ def main():
         test_classify_truncates_a_long_body,
         test_classify_handles_an_empty_body,
         test_classify_lets_a_model_failure_through,
+        test_classify_retries_a_read_timeout,
+        test_infographic_gives_up_at_once_on_a_permanent_error,
+        test_infographic_still_retries_a_timeout,
         test_visuals_takes_the_choice_of_jev,
         test_visuals_gives_the_infographic_the_runner_up_on_a_clash,
         test_visuals_breaks_a_tie_on_the_lowest_index,
@@ -1878,6 +1955,7 @@ def main():
         test_smtp_reports_actual_count_not_subscriber_count,
         test_delete_email_reconnects_after_a_reset,
         test_delete_email_warns_when_the_connection_stays_dead,
+        test_delete_email_searches_gmail_index,
         test_newsletter_cleanup_uses_one_connection_and_one_error,
         test_db_retries_a_timed_out_connection,
         test_db_failure_does_not_stop_the_run_or_leak_the_password,

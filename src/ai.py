@@ -1,6 +1,7 @@
 import json
 import os
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated
 from urllib.parse import parse_qs, urlparse, urlunparse
@@ -41,6 +42,9 @@ MIN_ARTICLES = 3
 
 # HTTP-statussen die vanzelf overgaan. 529 is Anthropic's Overloaded.
 TRANSIENT_STATUS_CODES = {429, 500, 502, 503, 504, 529}
+# HTTP-statussen die nooit vanzelf overgaan: fout verzoek, geen toegang, tegoed op.
+PERMANENT_STATUS_CODES = {400, 401, 402, 403}
+LLM_ERRORS = (RatelimitException, ModelOverloadException, ConnectionException, GeneralException)
 
 
 def load_prompt(name: str, **kwargs) -> str:
@@ -372,38 +376,19 @@ def generate_infographic(
     if not (cached and os.path.isfile(out_path)):
         lg.info('Generating infographic...')
         model = Model(INFOGRAPHIC_MODEL)
-        generated = False
-        # Retry logic with exponential backoff
-        for attempt in range(max_retries):
-            try:
-                if attempt > 0:
-                    lg.warning(f'Generating infographic (attempt {attempt + 1}/{max_retries})...')
 
-                img = model.generate_image(prompt)
-                if img is None:
-                    raise ValueError('Image generation returned None')
-                img.save(out_path, format='PNG')
-                lg.info('Image generated successfully')
-                generated = True
-                break
+        def generate() -> None:
+            img = model.generate_image(prompt)
+            if img is None:
+                raise ValueError('Image generation returned None')
+            img.save(out_path, format='PNG')
 
-            except (httpx.ReadTimeout, TimeoutError) as e:
-                if attempt == max_retries - 1:  # Last attempt
-                    lg.error(f'Failed to generate infographic after {max_retries} attempts: {e}')
-                    break
-
-                lg.warning('Timeout occurred, retrying...')
-                time.sleep(min(30 * 2**attempt, 300))
-
-            except Exception as e:
-                if attempt == max_retries - 1:  # Last attempt
-                    lg.error(f'Failed to generate infographic: {e!s}')
-                    break
-                lg.warning(f'Error generating infographic: {e!s}. Retrying...')
-                time.sleep(min(30 * 2**attempt, 300))
-
-        if not generated:
+        try:
+            with_retry(generate, retry_on=(Exception,), attempts=max_retries, wait=30, max_wait=300)
+        except Exception as e:
+            lg.error(f'Failed to generate infographic: {e!s}')
             return None, None
+        lg.info('Image generated successfully')
 
     # Upload to S3
     s3 = S3('harmsen.nl')
@@ -493,31 +478,58 @@ MAX_REPLY_BODY = 2000
 def classify_reply(sender: str, subject: str, body: str | None) -> str:
     """Kies een van REPLY_CATEGORIES voor een binnengekomen mail. Bij twijfel hp."""
     state = f'Van: {sender}\nOnderwerp: {subject}\n\n{(body or "")[:MAX_REPLY_BODY]}'
-    answer = Model(CLASSIFY_MODEL).classify(state, REPLY_CATEGORIES, instructions=CLASSIFY_INSTRUCTIONS, cached=False)
+    model = Model(CLASSIFY_MODEL)
+    answer = with_retry(
+        lambda: model.classify(state, REPLY_CATEGORIES, instructions=CLASSIFY_INSTRUCTIONS, cached=False)
+    )
     if answer['confidence'] < MIN_CONFIDENCE:
         lg.info(f'{sender}: {answer["choice"]} met confidence {answer["confidence"]:.2f}, onder de drempel dus hp')
         return 'hp'
     return answer['choice']
 
 
-def retry_prompt(model, prompt, return_json: bool = True, response_format=None):
-    """Prompt het model, met retry op transiente fouten. WARNING per poging, daarna doorgooien."""
-    attempts = 5
+def http_status(e: Exception) -> int | None:
+    """De HTTP-status van een fout, ook als justai de originele fout als eerste argument verpakt."""
+    for err in (e, *e.args[:1]):
+        code = getattr(err, 'status_code', None) or getattr(err, 'code', None)
+        if isinstance(code, int):
+            return code
+    return None
+
+
+def with_retry[T](
+    call: Callable[[], T],
+    retry_on: tuple[type[Exception], ...] = LLM_ERRORS,
+    attempts: int = 5,
+    wait: int = 5,
+    max_wait: int = 60,
+) -> T:
+    """call(), met backoff-retry op transiente fouten. WARNING per poging, daarna doorgooien."""
+    assert attempts > 0
     for attempt in range(attempts):
         try:
-            return model.prompt(prompt, return_json=return_json, response_format=response_format, cached=False)
-        except (RatelimitException, ModelOverloadException, ConnectionException, GeneralException) as e:
+            return call()
+        except retry_on as e:
             # justai verpakt een 529 Overloaded in GeneralException, niet in ModelOverloadException:
             # anthropic's OverloadedError is geen InternalServerError. Vandaar de status-check op de
-            # originele fout, zodat een permanente fout niet vijf keer geprobeerd wordt.
-            original = e.args[0] if e.args else None
-            if isinstance(e, GeneralException) and getattr(original, 'status_code', None) not in TRANSIENT_STATUS_CODES:
+            # originele fout. Een permanente status (402: tegoed op) gaat nooit vanzelf over.
+            status = http_status(e)
+            if status in PERMANENT_STATUS_CODES or (
+                isinstance(e, GeneralException) and status not in TRANSIENT_STATUS_CODES
+            ):
                 raise
             if attempt == attempts - 1:
-                # Geen lg.error hier: main.py logt de doorgegooide fout al als CRITICAL.
+                # Geen lg.error hier: de aanroeper logt de doorgegooide fout al.
                 # Allebei zou Janitor twee issues geven voor één gebeurtenis.
                 lg.warning(f'{type(e).__name__} na {attempts} pogingen, opgegeven: {e}')
                 raise
-            wait = min(5 * 2**attempt, 60)
-            lg.warning(f'{type(e).__name__}: {e}. Retrying in {wait}s (attempt {attempt + 1}/{attempts})...')
-            time.sleep(wait)
+            delay = min(wait * 2**attempt, max_wait)
+            lg.warning(f'{type(e).__name__}: {e}. Retrying in {delay}s (attempt {attempt + 1}/{attempts})...')
+            time.sleep(delay)
+
+
+def retry_prompt(model, prompt, return_json: bool = True, response_format=None):
+    """Prompt het model, met retry op transiente fouten."""
+    return with_retry(
+        lambda: model.prompt(prompt, return_json=return_json, response_format=response_format, cached=False)
+    )
