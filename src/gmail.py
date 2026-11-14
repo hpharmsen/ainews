@@ -100,8 +100,9 @@ class Mail:
                 # It's a UID, use it directly
                 email_uid = identifier.encode('utf-8')
             else:
-                # It's a Message-ID, search for it
-                status, email_uids = self.mail.uid('search', None, f'(HEADER Message-ID "{identifier}")')
+                # Message-ID: zoek via Gmail's eigen index. HEADER Message-ID scant de hele map
+                # en liep op een trage Gmail tegen IMAP_TIMEOUT aan.
+                status, email_uids = self.mail.uid('search', None, 'X-GM-RAW', f'"rfc822msgid:{identifier}"')
                 if status != 'OK' or not email_uids or not email_uids[0]:
                     lg.error(f'✗ Email with Message-ID {identifier} not found in {folder}')
                     return False
