@@ -102,8 +102,15 @@ class Mail:
             else:
                 # Message-ID: zoek via Gmail's eigen index. HEADER Message-ID scant de hele map
                 # en liep op een trage Gmail tegen IMAP_TIMEOUT aan.
-                status, email_uids = self.mail.uid('search', None, 'X-GM-RAW', f'"rfc822msgid:{identifier}"')
+                query = ('X-GM-RAW', f'"rfc822msgid:{identifier}"')
+                status, email_uids = self.mail.uid('search', None, *query)
                 if status != 'OK' or not email_uids or not email_uids[0]:
+                    # Een afgebroken eerdere poging kan de kopie al naar Trash verplaatst hebben
+                    self.mail.select('"[Gmail]/Trash"', readonly=True)
+                    status, trashed = self.mail.uid('search', None, *query)
+                    if status == 'OK' and trashed and trashed[0]:
+                        lg.info(f'✓ Email {identifier} stond al in Trash')
+                        return True
                     lg.error(f'✗ Email with Message-ID {identifier} not found in {folder}')
                     return False
                 email_uid = email_uids[0].split()[0]

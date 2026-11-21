@@ -1842,6 +1842,22 @@ def test_delete_email_searches_gmail_index():
     print('  PASS test_delete_email_searches_gmail_index')
 
 
+def test_delete_email_counts_a_copy_already_in_trash():
+    """Janitor 00304/00305: na een timeout stond de kopie al in Trash. Geen ERROR, telt als verwijderd."""
+    conn = MagicMock()
+    conn.select.return_value = ('OK', [b'1'])
+    selected = lambda: conn.select.call_args.args[0]
+    conn.uid.side_effect = lambda cmd, *a: ('OK', [b'42' if 'Trash' in selected() else b''])
+    mail = _mail_on(conn)
+    with patch('src.gmail.lg') as glg:
+        ok = mail.delete_email('abc@harmsen.nl')
+
+    assert ok, 'een kopie die al in Trash staat hoort als verwijderd te tellen'
+    assert not glg.error.called, f'kopie in Trash mag geen ERROR geven: {glg.error.call_args_list}'
+    assert not any(c.args[0] == 'copy' for c in conn.uid.call_args_list), 'niets meer te kopiëren'
+    print('  PASS test_delete_email_counts_a_copy_already_in_trash')
+
+
 def test_newsletter_cleanup_uses_one_connection_and_one_error():
     """Eén IMAP-verbinding voor alle kopieën, netjes gesloten; achterblijvers geven één ERROR."""
     from contextlib import ExitStack
@@ -1956,6 +1972,7 @@ def main():
         test_delete_email_reconnects_after_a_reset,
         test_delete_email_warns_when_the_connection_stays_dead,
         test_delete_email_searches_gmail_index,
+        test_delete_email_counts_a_copy_already_in_trash,
         test_newsletter_cleanup_uses_one_connection_and_one_error,
         test_db_retries_a_timed_out_connection,
         test_db_failure_does_not_stop_the_run_or_leak_the_password,
