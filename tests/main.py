@@ -1296,6 +1296,7 @@ def _run_main(
     real_replies: bool = False,
     selection: dict | None = None,
     image_index: int = 0,
+    reject_reason: str | None = None,
 ):
     """Draai main.main() met alles eromheen afgevangen; geeft de aanroeporde terug."""
     from contextlib import ExitStack
@@ -1320,7 +1321,7 @@ def _run_main(
         'parse_emails_to_dict': MagicMock(return_value={f'bron {i}': 'tekst' for i in range(source_emails)}),
         'generate_ai_summary': MagicMock(return_value=articles),
         'edit_articles': MagicMock(return_value=articles),
-        'check_publishable': MagicMock(return_value=None),
+        'check_publishable': MagicMock(return_value=reject_reason),
         'select_articles_for_visuals': MagicMock(
             return_value=selection or {'image_article': 0, 'infographic_article': 1}
         ),
@@ -1377,6 +1378,18 @@ def test_source_gate_errors_only_without_any_source_email():
         assert getattr(lg_mock, level).called, f'{count} bronmails hoort {level} te geven'
         assert not getattr(lg_mock, other).called, f'{count} bronmails mag geen {other} geven'
     print('  PASS test_source_gate_errors_only_without_any_source_email')
+
+
+def test_rejection_errors_only_with_enough_source_emails():
+    """Janitor 00310: afkeuring bij weinig bronmails is een stille dag (WARNING), anders ERROR."""
+    for count, level in ((2, 'warning'), (4, 'warning'), (5, 'error')):
+        with patch('main.lg') as lg_mock:
+            calls, _ = _run_main(source_emails=count, reject_reason='1 artikelen, minimaal 3 nodig')
+        other = 'error' if level == 'warning' else 'warning'
+        assert calls == ['replies'], f'afgekeurde nieuwsbrief mag niet verstuurd worden, kreeg {calls}'
+        assert getattr(lg_mock, level).called, f'afkeuring bij {count} bronmails hoort {level} te geven'
+        assert not getattr(lg_mock, other).called, f'afkeuring bij {count} bronmails mag geen {other} geven'
+    print('  PASS test_rejection_errors_only_with_enough_source_emails')
 
 
 def test_main_sends_the_newsletter_when_the_handler_fails():
@@ -1953,6 +1966,7 @@ def main():
         test_main_skips_the_handler_on_a_dry_run,
         test_main_runs_the_first_pass_even_when_the_source_gate_stops_the_run,
         test_source_gate_errors_only_without_any_source_email,
+        test_rejection_errors_only_with_enough_source_emails,
         test_main_sends_the_newsletter_when_the_handler_fails,
         test_main_shifts_the_infographic_behind_the_moved_image_article,
         test_main_keeps_the_infographic_index_when_the_image_stays_first,

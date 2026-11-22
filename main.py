@@ -22,6 +22,7 @@ from src.replies import handle_replies
 
 VERBOSE = True
 MIN_SOURCE_EMAILS = 2  # minder bronmails betekent geen nieuwsbrief, maar een melding
+QUIET_SOURCE_EMAILS = 5  # afkeuring bij minder bronmails is weinig aanbod, geen storing
 MONTHS = [
     'januari',
     'februari',
@@ -106,7 +107,8 @@ def main():
     articles = edit_articles(schedule, articles, cached=cached, verbose=VERBOSE)
 
     if reason := check_publishable(articles):
-        lg.error(f"Nieuwsbrief '{schedule}' afgekeurd: {reason}. Niet verstuurd.")
+        log = lg.warning if len(emails_dict) < QUIET_SOURCE_EMAILS else lg.error
+        log(f"Nieuwsbrief '{schedule}' afgekeurd: {reason} uit {len(emails_dict)} bronmails. Niet verstuurd.")
         return
 
     # Select articles for both visuals in one prompt
